@@ -22,7 +22,6 @@ struct ComposerView: View {
     private let minimumProcessingTime: Duration = .seconds(3)
 
     @StateObject private var transcriber = SpeechTranscriber()
-    @State private var typedBeforeRecording: String = ""
 
     var body: some View {
         NotionPage(topBar: AnyView(topBar)) {
@@ -93,7 +92,8 @@ struct ComposerView: View {
                             .fill(transcriber.isRecording ? Color.red.opacity(0.9) : Color.black.opacity(0.06))
                     )
             }
-            .help(transcriber.isRecording ? "Stop transcription" : "Start transcription")
+            .disabled(isSubmitting || transcriber.isTranscribing)
+            .help(transcriber.isRecording ? "Stop recording and transcribe" : "Start recording")
 
             Button {
                 submit()
@@ -108,7 +108,12 @@ struct ComposerView: View {
                 }
             }
             .buttonStyle(NotionPillButtonStyle(prominent: true))
-            .disabled(isSubmitting || rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(
+                isSubmitting
+                    || transcriber.isRecording
+                    || transcriber.isTranscribing
+                    || rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            )
             .keyboardShortcut(.return, modifiers: [.command])
         }
     }
@@ -116,7 +121,9 @@ struct ComposerView: View {
     private var editor: some View {
         Group {
             if transcriber.isRecording {
-                transcriptDisplay
+                recordingDisplay
+            } else if transcriber.isTranscribing {
+                transcribingDisplay
             } else {
                 typingEditor
             }
@@ -162,7 +169,7 @@ struct ComposerView: View {
             .background(Color.black.opacity(0.045), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             ScrollView {
-                Text(transcriber.transcript.isEmpty ? "Speak to start…" : transcriber.transcript)
+                Text(transcriber.transcript.isEmpty ? "Processing recording…" : transcriber.transcript)
                     .font(.system(size: 16, weight: .regular, design: .default))
                     .lineSpacing(4)
                     .foregroundStyle(Color.black.opacity(transcriber.transcript.isEmpty ? 0.55 : 0.86))
@@ -174,37 +181,78 @@ struct ComposerView: View {
         }
     }
 
-    private func toggleRecording() async {
-        if transcriber.isRecording {
-            transcriber.stop()
-            let t = transcriber.finalText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !t.isEmpty {
-                if typedBeforeRecording.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    rawText = t
-                } else {
-                    rawText = typedBeforeRecording + "\n\n" + t
-                }
-            } else {
-                rawText = typedBeforeRecording
+    private var recordingDisplay: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(Color.red.opacity(0.9))
+                    .frame(width: 10, height: 10)
+                Text("Recording…")
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                    .foregroundStyle(Color.black.opacity(0.8))
+                Spacer()
+                Text(formatTime(transcriber.recordingSeconds))
+                    .font(.caption)
+                    .foregroundStyle(NotionStyle.textSecondary)
             }
-            typedBeforeRecording = ""
-            isEditorFocused = true
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color.black.opacity(0.045), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            Text("Tap the microphone again to stop and transcribe.")
+                .font(.system(size: 16, weight: .regular, design: .default))
+                .lineSpacing(4)
+                .foregroundStyle(Color.black.opacity(0.78))
+        }
+        .frame(minHeight: 280, alignment: .top)
+    }
+
+    private var transcribingDisplay: some View {
+        transcriptDisplay
+    }
+
+    private func toggleRecording() async {
+        if transcriber.isTranscribing { return }
+
+        if transcriber.isRecording {
+            isEditorFocused = false
+            let existing = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            do {
+                let t = try await transcriber.stopRecordingAndTranscribe()
+                let newText = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !newText.isEmpty {
+                    if existing.isEmpty {
+                        rawText = newText
+                    } else {
+                        rawText = existing + "\n\n" + newText
+                    }
+                }
+                isEditorFocused = true
+            } catch {
+                errorMessage = transcriber.lastError ?? (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+                isEditorFocused = true
+            }
             return
         }
 
         // Start recording.
-        typedBeforeRecording = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
-        rawText = ""
         isEditorFocused = false
         transcriber.reset()
-        await transcriber.start()
+        await transcriber.startRecording()
 
         if !transcriber.isRecording, let err = transcriber.lastError, !err.isEmpty {
             errorMessage = err
-            rawText = typedBeforeRecording
-            typedBeforeRecording = ""
             isEditorFocused = true
         }
+    }
+
+    private func formatTime(_ seconds: TimeInterval) -> String {
+        let s = max(0, Int(seconds.rounded()))
+        let h = s / 3600
+        let m = (s % 3600) / 60
+        let sec = s % 60
+        if h > 0 { return String(format: "%d:%02d:%02d", h, m, sec) }
+        return String(format: "%d:%02d", m, sec)
     }
 
     private func submit() {

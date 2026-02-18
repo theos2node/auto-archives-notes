@@ -14,15 +14,19 @@ struct NoteDetailHostView: View {
     @Query(sort: \Note.createdAt, order: .reverse) private var notes: [Note]
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBar
-            if let note = notes.first(where: { $0.id == noteID }) {
-                NoteDetailView(note: note)
-            } else {
-                Text("Note not found.")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        NotionPage(topBar: AnyView(topBar)) {
+            NotionCard {
+                if let note = notes.first(where: { $0.id == noteID }) {
+                    NoteDetailView(note: note)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 16)
+                } else {
+                    Text("Note not found.")
+                        .foregroundStyle(NotionStyle.textSecondary)
+                        .padding(26)
+                }
             }
+            .padding(.top, 8)
         }
     }
 
@@ -33,7 +37,7 @@ struct NoteDetailHostView: View {
             } label: {
                 Text("Main menu")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(NotionPillButtonStyle(prominent: false))
 
             Spacer()
 
@@ -42,12 +46,8 @@ struct NoteDetailHostView: View {
             } label: {
                 Text("New note")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(NotionPillButtonStyle(prominent: true))
             .keyboardShortcut("n", modifiers: [.command])
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .background(.thinMaterial)
     }
 }
-

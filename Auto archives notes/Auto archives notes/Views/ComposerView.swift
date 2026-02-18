@@ -21,9 +21,13 @@ struct ComposerView: View {
     private let minimumProcessingTime: Duration = .seconds(3)
 
     var body: some View {
-        VStack(spacing: 0) {
-            editor
-            bottomBar
+        NotionPage(topBar: AnyView(topBar)) {
+            NotionCard {
+                editor
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 16)
+            }
+            .padding(.top, 8)
         }
         .onAppear { isEditorFocused = true }
         .alert("Submit failed", isPresented: Binding(
@@ -38,34 +42,14 @@ struct ComposerView: View {
         })
     }
 
-    private var editor: some View {
-        ZStack(alignment: .topLeading) {
-            TextEditor(text: $rawText)
-                .focused($isEditorFocused)
-                .font(.system(.body, design: .rounded))
-                .scrollContentBackground(.hidden)
-                .padding(14)
-                .background(.clear)
-                .disabled(isSubmitting)
-
-            if rawText.isEmpty {
-                Text("Write a thought, an idea, a to-do, anything…")
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 22)
-            }
-        }
-        .padding(18)
-    }
-
-    private var bottomBar: some View {
+    private var topBar: some View {
         HStack(spacing: 10) {
             Button {
                 onGoToMenu?()
             } label: {
                 Text("Main menu")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(NotionPillButtonStyle(prominent: false))
 
             Spacer()
 
@@ -73,18 +57,38 @@ struct ComposerView: View {
                 submit()
             } label: {
                 if isSubmitting {
-                    ProgressView().controlSize(.small)
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Submitting")
+                    }
                 } else {
                     Text("Submit")
                 }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(NotionPillButtonStyle(prominent: true))
             .disabled(isSubmitting || rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .keyboardShortcut(.return, modifiers: [.command])
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .background(.thinMaterial)
+    }
+
+    private var editor: some View {
+        ZStack(alignment: .topLeading) {
+            TextEditor(text: $rawText)
+                .focused($isEditorFocused)
+                .font(.system(size: 16, weight: .regular, design: .default))
+                .lineSpacing(4)
+                .scrollContentBackground(.hidden)
+                .background(.clear)
+                .disabled(isSubmitting)
+
+            if rawText.isEmpty {
+                Text("Type anything…")
+                    .font(.system(size: 16, weight: .regular, design: .default))
+                    .foregroundStyle(NotionStyle.textSecondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 8)
+            }
+        }
     }
 
     private func submit() {

@@ -10,25 +10,14 @@ struct NoteListRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(.quaternary)
-                Text(note.displayEmoji)
-                    .font(.system(size: 14))
-            }
-            .frame(width: 24, height: 24)
+            Text(note.displayEmoji)
+                .font(.system(size: 16))
+                .frame(width: 24, alignment: .leading)
 
             Text(note.displayTitle)
-                .font(.system(.body, design: .rounded))
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.black.opacity(0.86))
                 .lineLimit(1)
-
-            Spacer(minLength: 8)
-
-            if note.isEnhancing {
-                ProgressView()
-                    .controlSize(.mini)
-            }
         }
-        .padding(.vertical, 4)
     }
 }

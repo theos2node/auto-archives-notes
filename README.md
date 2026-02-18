@@ -20,5 +20,6 @@ Use Apple on-device foundation models to categorize, structure, and store notes 
 
 ## Website
 
-This repo includes a GitHub Pages site in `docs/` (deployed via GitHub Actions).
+This repo includes a GitHub Pages site in `docs/`:
 
+- https://theos2node.github.io/auto-archives-notes/

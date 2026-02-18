@@ -64,6 +64,49 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
             return content.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
+        private struct ExtractedJSON: Decodable, Sendable {
+            var title: String?
+            var emoji: String?
+            var tags: [String]?
+            var kind: String?
+            var status: String?
+            var priority: String?
+            var area: String?
+            var project: String?
+            var people: [String]?
+            var dueAt: String?
+            var summary: String?
+            var actionItems: [String]?
+        }
+
+        private func extractJSONObject(from raw: String) -> String? {
+            // The model may (rarely) wrap JSON with extra text. Grab the first balanced {...}.
+            let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let start = s.firstIndex(of: "{") else { return nil }
+
+            var depth = 0
+            var i = start
+            while i < s.endIndex {
+                let ch = s[i]
+                if ch == "{" { depth += 1 }
+                if ch == "}" {
+                    depth -= 1
+                    if depth == 0 {
+                        let end = s.index(after: i)
+                        return String(s[start..<end])
+                    }
+                }
+                i = s.index(after: i)
+            }
+            return nil
+        }
+
+        private func decodeExtractedJSON(_ raw: String) -> ExtractedJSON? {
+            let jsonString = extractJSONObject(from: raw) ?? raw
+            guard let data = jsonString.data(using: .utf8) else { return nil }
+            return try? JSONDecoder().decode(ExtractedJSON.self, from: data)
+        }
+
         private func ensureAvailable(_ model: SystemLanguageModel) throws {
             switch model.availability {
             case .available:
@@ -103,46 +146,62 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
             let corrected = try await callString(general, correctedPrompt, maxTokens: 900)
             let correctedOrTrimmed = corrected.isEmpty ? trimmed : corrected
 
-            // Each attribute gets its own model call (more robust, higher quality).
-            let titleRaw = (try? await callString(tagging, titlePrompt(noteText: correctedOrTrimmed), maxTokens: 60)) ?? ""
+            // Pass 2: extract structured fields in one shot.
+            // This reduces queued calls dramatically (important for slow on-device models).
+            iso8601.formatOptions = [.withInternetDateTime]
+            let now = iso8601.string(from: Date())
+            let tz = TimeZone.current.identifier
+
+            let extractPrompt = """
+            Extract structured fields from the note below.
+            Output STRICT JSON only (no markdown, no commentary), matching this schema:
+            {
+              "title": string,                  // 3-5 words
+              "emoji": string,                  // exactly 1 emoji
+              "tags": [string, string, string], // exactly 3, each starts with '#'
+              "kind": "idea"|"task"|"meeting"|"journal"|"reference",
+              "status": "inbox"|"next"|"later"|"done",
+              "priority": "p1"|"p2"|"p3",       // if kind != task, use "p3"
+              "area": "work"|"personal"|"health"|"finance"|"learning"|"admin"|"other",
+              "project": string,                // 1-4 words or empty
+              "people": [string],               // 0-3 names
+              "dueAt": string,                  // ISO-8601 or empty (resolve relative dates using now/tz)
+              "summary": string,                // 1 sentence, <= 20 words
+              "actionItems": [string]           // 0-7 items, imperative; if kind is task, at least 1
+            }
+
+            Resolve relative dates using:
+            - Current date/time: \(now)
+            - Timezone: \(tz)
+
+            NOTE:
+            \(correctedOrTrimmed)
+            """
+
+            let extractedRaw = (try? await callString(tagging, extractPrompt, maxTokens: 420)) ?? ""
+            let extracted = decodeExtractedJSON(extractedRaw)
+
+            let titleRaw = extracted?.title ?? ""
             let title = normalizeTitle(titleRaw, correctedText: correctedOrTrimmed)
 
-            let emojiRaw = (try? await callString(tagging, emojiPrompt(noteText: correctedOrTrimmed), maxTokens: 20)) ?? ""
+            let emojiRaw = extracted?.emoji ?? ""
             let emoji = normalizeEmoji(emojiRaw)
 
-            let tagsRaw = (try? await callString(tagging, tagsPrompt(noteText: correctedOrTrimmed), maxTokens: 120)) ?? ""
-            let tags = await normalizeTags(parseTags(from: tagsRaw), correctedText: correctedOrTrimmed)
+            let tagsIn = extracted?.tags ?? []
+            let tags = await normalizeTags(tagsIn, correctedText: correctedOrTrimmed)
 
-            let kindRaw = (try? await callString(tagging, kindPrompt(noteText: correctedOrTrimmed), maxTokens: 30)) ?? ""
-            let kind = normalizeKind(kindRaw)
+            let kind = normalizeKind(extracted?.kind ?? "")
+            let status = normalizeStatus(extracted?.status ?? "", kind: kind)
+            let priority = normalizePriority(extracted?.priority ?? "", kind: kind)
+            let area = normalizeArea(extracted?.area ?? "")
 
-            let statusRaw = (try? await callString(tagging, statusPrompt(noteText: correctedOrTrimmed, kind: kind), maxTokens: 40)) ?? ""
-            let status = normalizeStatus(statusRaw, kind: kind)
+            let project = (extracted?.project ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let people = normalizePeople(extracted?.people ?? [])
 
-            let priorityRaw = (kind == .task)
-                ? ((try? await callString(tagging, priorityPrompt(noteText: correctedOrTrimmed), maxTokens: 30)) ?? "")
-                : ""
-            let priority = normalizePriority(priorityRaw, kind: kind)
+            let summary = normalizeSummary(extracted?.summary ?? "", correctedText: correctedOrTrimmed, title: title)
+            let actionItems = normalizeActionItems(extracted?.actionItems ?? [], kind: kind, title: title)
 
-            let areaRaw = (try? await callString(tagging, areaPrompt(noteText: correctedOrTrimmed), maxTokens: 30)) ?? ""
-            let area = normalizeArea(areaRaw)
-
-            let projectRaw = (try? await callString(tagging, projectPrompt(noteText: correctedOrTrimmed), maxTokens: 70)) ?? ""
-            let project = projectRaw.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            let peopleRaw = (try? await callString(tagging, peoplePrompt(noteText: correctedOrTrimmed), maxTokens: 120)) ?? ""
-            let people = normalizePeople(parseList(from: peopleRaw))
-
-            let summaryRaw = (try? await callString(general, summaryPrompt(noteText: correctedOrTrimmed), maxTokens: 120)) ?? ""
-            let summary = normalizeSummary(summaryRaw, correctedText: correctedOrTrimmed, title: title)
-
-            let actionRaw = (try? await callString(general, actionItemsPrompt(noteText: correctedOrTrimmed, kind: kind), maxTokens: 240)) ?? ""
-            let actionItems = normalizeActionItems(parseList(from: actionRaw), kind: kind, title: title)
-
-            let dueRaw = (kind == .task)
-                ? ((try? await callString(tagging, dueAtPrompt(noteText: correctedOrTrimmed), maxTokens: 120)) ?? "")
-                : ""
-            let dueAt = parseDueAt(dueRaw, kind: kind)
+            let dueAt = parseDueAt(extracted?.dueAt ?? "", kind: kind)
 
             // Prefer deterministic link extraction to avoid hallucinations.
             let links = normalizeLinks([], correctedText: correctedOrTrimmed)
@@ -169,9 +228,7 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
             """
             Generate a short, specific title for this note.
             Requirements:
-            - <= 5 words
-            - No leading articles ("the", "a", "an")
-            - Not generic
+            - 3-5 words
             Output ONLY the title text.
 
             NOTE:
@@ -380,24 +437,48 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
             return out
         }
 
+        private func extractWords(_ s: String) -> [String] {
+            s.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+                .map { String($0).trimmingCharacters(in: CharacterSet.alphanumerics.inverted) }
+                .filter { !$0.isEmpty }
+        }
+
         private func normalizeTitle(_ s: String, correctedText: String) -> String {
             let compact = s
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
 
-            let words = compact
-                .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-                .map(String.init)
+            let words = extractWords(compact)
+            var picked: [String] = []
+            for w in dropLeadingStopwords(words) {
+                if picked.count == 5 { break }
+                picked.append(w)
+            }
 
-            let capped = dropLeadingStopwords(words).prefix(5).joined(separator: " ")
-            if capped.isEmpty {
-                // Very conservative fallback: first 5 words of corrected text.
-                let fallbackWords = correctedText
-                    .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-                    .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-                    .map(String.init)
-                let cappedFallback = dropLeadingStopwords(fallbackWords).prefix(5)
-                return cappedFallback.isEmpty ? "Quick Note" : cappedFallback.joined(separator: " ")
+            if picked.count < 3 {
+                let fallbackWords = extractWords(correctedText)
+                let meaningful = dropLeadingStopwords(fallbackWords)
+                let fillers = meaningful + fallbackWords
+                for w in fillers {
+                    if picked.count >= 3 { break }
+                    if picked.contains(where: { $0.caseInsensitiveCompare(w) == .orderedSame }) { continue }
+                    picked.append(w)
+                    if picked.count == 5 { break }
+                }
+            }
+
+            if picked.count < 3 {
+                return "Quick Note Capture"
+            }
+
+            var capped = picked.prefix(5).joined(separator: " ")
+            capped = capped.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`“”‘’"))
+            capped = capped.trimmingCharacters(in: CharacterSet(charactersIn: " .,:;!?\n\t"))
+
+            // Make titles consistent: capitalize the first letter if it is alphabetic.
+            if let first = capped.first, first.isLetter, String(first) == String(first).lowercased() {
+                capped = String(first).uppercased() + capped.dropFirst()
             }
             return capped
         }
@@ -420,8 +501,14 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
         private func normalizeEmoji(_ s: String) -> String {
             let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty { return "📝" }
-            // Keep first scalar cluster; don't try to be perfect about emoji detection.
-            return String(trimmed.prefix(2))
+
+            // Pick the first emoji-looking grapheme cluster; reject plain text like "ti".
+            for ch in trimmed {
+                if ch.unicodeScalars.contains(where: { $0.properties.isEmoji }) {
+                    return String(ch)
+                }
+            }
+            return "📝"
         }
 
         private func normalizeKind(_ s: String) -> NoteKind {

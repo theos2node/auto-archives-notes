@@ -87,6 +87,13 @@ h1 {
   line-height: 1.75;
 }
 
+.bullets {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--fg1);
+  line-height: 1.75;
+}
+
 .footer {
   margin-top: 26px;
   color: rgba(234, 241, 255, 0.6);
@@ -122,4 +129,3 @@ h1 {
     font-size: 16px;
   }
 }
-

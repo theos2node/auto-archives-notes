@@ -138,14 +138,6 @@ struct ComposerView: View {
                 .scrollContentBackground(.hidden)
                 .background(.clear)
                 .disabled(isSubmitting)
-
-            if rawText.isEmpty {
-                Text("Type anything…")
-                    .font(.system(size: 16, weight: .regular, design: .default))
-                    .foregroundStyle(NotionStyle.textSecondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 8)
-            }
         }
     }
 

@@ -5,17 +5,20 @@
 
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 struct MainMenuView: View {
     @Query(sort: \Note.createdAt, order: .reverse) private var notes: [Note]
 
     var onNewNote: (() -> Void)?
     var onTranscript: (() -> Void)?
-    var onChat: (() -> Void)?
     var onOpenNote: ((UUID) -> Void)?
 
     @State private var view: MenuView = .inbox
     @State private var searchText: String = ""
+    @State private var isExporting = false
+    @State private var exportDocument = NotesExportDocument()
+    @State private var exportError: String?
 
     var body: some View {
         NotionPage(topBar: AnyView(topBar)) {
@@ -42,6 +45,26 @@ struct MainMenuView: View {
                 .padding(.top, 8)
             }
         }
+        .fileExporter(
+            isPresented: $isExporting,
+            document: exportDocument,
+            contentType: .json,
+            defaultFilename: defaultExportFilename()
+        ) { result in
+            if case .failure(let error) = result {
+                exportError = error.localizedDescription
+            }
+        }
+        .alert("Export failed", isPresented: Binding(
+            get: { exportError != nil },
+            set: { isPresented in
+                if !isPresented { exportError = nil }
+            }
+        ), actions: {
+            Button("OK", role: .cancel) { exportError = nil }
+        }, message: {
+            Text(exportError ?? "")
+        })
     }
 
     private var topBar: some View {
@@ -65,13 +88,18 @@ struct MainMenuView: View {
                 .help("Transcript")
 
                 Button {
-                    onChat?()
+                    let data = makeExportData(notes: notes)
+                    if data.isEmpty {
+                        exportError = "Unable to create export data."
+                        return
+                    }
+                    exportDocument = NotesExportDocument(data: data)
+                    isExporting = true
                 } label: {
-                    Image(systemName: "bubble.left.and.bubble.right")
-                        .font(.system(size: 13, weight: .semibold))
+                    Text("Export")
                 }
                 .buttonStyle(NotionPillButtonStyle(prominent: false))
-                .help("Chat")
+                .help("Export notes as JSON")
 
                 Button {
                     onNewNote?()
@@ -170,6 +198,20 @@ struct MainMenuView: View {
                 || note.actionItemsText.localizedCaseInsensitiveContains(q)
                 || note.linksCSV.localizedCaseInsensitiveContains(q)
         }
+    }
+
+    private func makeExportData(notes: [Note]) -> Data {
+        let payload = NotesExportPayload(notes: notes)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        return (try? encoder.encode(payload)) ?? Data()
+    }
+
+    private func defaultExportFilename() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return "auto-archives-notes-\(formatter.string(from: Date()))"
     }
 }
 

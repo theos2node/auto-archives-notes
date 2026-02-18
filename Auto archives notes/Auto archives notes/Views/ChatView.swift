@@ -234,10 +234,17 @@ struct ChatView: View {
         HStack(spacing: 10) {
             TextField("Ask your notes…", text: $draft, axis: .vertical)
                 .lineLimit(1...3)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
                 .focused($isInputFocused)
                 .disabled(isThinking)
                 .onSubmit { send() }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(NotionStyle.fillSubtle, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(NotionStyle.line, lineWidth: 1)
+                )
 
             Button {
                 send()

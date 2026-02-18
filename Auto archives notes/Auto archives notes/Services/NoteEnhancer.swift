@@ -137,23 +137,36 @@ final class LocalHeuristicEnhancer: NoteEnhancer, @unchecked Sendable {
         let words = tokenizeWords(compact)
         let trimmedLead = dropLeadingStopwords(words)
 
-        var candidate: String
+        var candidateWords: [String] = []
+        var usedKeywordsFallback = false
         if trimmedLead.count >= 3 {
-            // Hard requirement: <= 5 words.
-            candidate = trimmedLead.prefix(5).joined(separator: " ")
+            candidateWords = Array(trimmedLead.prefix(5))
         } else {
             // Fallback: build a title from keywords.
-            let keywords = topKeywords(in: s, limit: 4)
-            if keywords.isEmpty {
-                candidate = "Quick Note"
-            } else {
-                // Also keep <= 5 words here.
-                candidate = keywords.prefix(5).joined(separator: " ").capitalized
+            usedKeywordsFallback = true
+            candidateWords = topKeywords(in: s, limit: 4)
+        }
+
+        if candidateWords.count < 3 {
+            let baseWords = dropLeadingStopwords(tokenizeWords(base))
+            for w in baseWords {
+                if candidateWords.count >= 3 { break }
+                if candidateWords.contains(where: { $0.caseInsensitiveCompare(w) == .orderedSame }) { continue }
+                candidateWords.append(w)
             }
         }
 
+        if candidateWords.count < 3 {
+            candidateWords = ["Quick", "Note", "Capture"]
+        }
+
+        var candidate = candidateWords.prefix(5).joined(separator: " ")
         candidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-        if candidate.isEmpty { candidate = "Quick Note" }
+        if usedKeywordsFallback {
+            candidate = candidate.capitalized
+        } else if let first = candidate.first, first.isLetter, String(first) == String(first).lowercased() {
+            candidate = String(first).uppercased() + candidate.dropFirst()
+        }
         candidate = candidate.prefix(60).trimmingCharacters(in: .whitespacesAndNewlines)
         return candidate
     }

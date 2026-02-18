@@ -91,6 +91,11 @@ struct NoteDetailView: View {
                     set: { note.status = $0 }
                 ), all: NoteStatus.allCases) { $0.rawValue.uppercased() }
 
+                propertyPicker("Area", selection: Binding(
+                    get: { note.area },
+                    set: { note.area = $0 }
+                ), all: NoteArea.allCases) { $0.rawValue.capitalized }
+
                 propertyPicker("Priority", selection: Binding(
                     get: { note.priority },
                     set: { note.priority = $0 }
@@ -115,6 +120,82 @@ struct NoteDetailView: View {
             }
 
             if note.kind == .task {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Due")
+                            .font(.caption)
+                            .foregroundStyle(NotionStyle.textSecondary)
+
+                        HStack(spacing: 10) {
+                            Toggle("Has due date", isOn: Binding(
+                                get: { note.dueAt != nil },
+                                set: { has in
+                                    note.dueAt = has ? (note.dueAt ?? Date()) : nil
+                                }
+                            ))
+                            .labelsHidden()
+
+                            if note.dueAt != nil {
+                                DatePicker(
+                                    "",
+                                    selection: Binding(
+                                        get: { note.dueAt ?? Date() },
+                                        set: { note.dueAt = $0 }
+                                    ),
+                                    displayedComponents: [.date]
+                                )
+                                .labelsHidden()
+                            } else {
+                                Text("None")
+                                    .foregroundStyle(NotionStyle.textSecondary)
+                            }
+                        }
+                    }
+                    Spacer()
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Summary")
+                    .font(.caption)
+                    .foregroundStyle(NotionStyle.textSecondary)
+                TextField("", text: Binding(
+                    get: { note.summary },
+                    set: { note.summary = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Action items")
+                    .font(.caption)
+                    .foregroundStyle(NotionStyle.textSecondary)
+                TextEditor(text: Binding(
+                    get: { note.actionItemsText },
+                    set: { note.actionItemsText = $0 }
+                ))
+                .scrollContentBackground(.hidden)
+                .frame(height: 90)
+                .padding(8)
+                .background(Color.white.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                )
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Links")
+                    .font(.caption)
+                    .foregroundStyle(NotionStyle.textSecondary)
+                TextField("Comma-separated URLs", text: Binding(
+                    get: { note.linksCSV },
+                    set: { note.linksCSV = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+            }
+
+            if note.kind == .task {
                 HStack(spacing: 10) {
                     Button {
                         note.status = (note.status == .done) ? .inbox : .done
@@ -132,8 +213,13 @@ struct NoteDetailView: View {
         .onChange(of: note.kind) { _, _ in persist() }
         .onChange(of: note.status) { _, _ in persist() }
         .onChange(of: note.priority) { _, _ in persist() }
+        .onChange(of: note.areaRaw) { _, _ in persist() }
         .onChange(of: note.project) { _, _ in persist() }
         .onChange(of: note.peopleCSV) { _, _ in persist() }
+        .onChange(of: note.dueAt) { _, _ in persist() }
+        .onChange(of: note.summary) { _, _ in persist() }
+        .onChange(of: note.actionItemsText) { _, _ in persist() }
+        .onChange(of: note.linksCSV) { _, _ in persist() }
         .onChange(of: note.pinned) { _, _ in persist() }
     }
 

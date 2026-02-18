@@ -136,6 +136,9 @@ struct MainMenuView: View {
                 || note.tagsCSV.localizedCaseInsensitiveContains(q)
                 || note.project.localizedCaseInsensitiveContains(q)
                 || note.peopleCSV.localizedCaseInsensitiveContains(q)
+                || note.summary.localizedCaseInsensitiveContains(q)
+                || note.actionItemsText.localizedCaseInsensitiveContains(q)
+                || note.linksCSV.localizedCaseInsensitiveContains(q)
         }
     }
 }
@@ -169,6 +172,14 @@ private struct NotionMenuRow: View {
                         .font(.caption)
                         .foregroundStyle(NotionStyle.textSecondary)
 
+                    Text(note.area.rawValue.capitalized)
+                        .font(.caption)
+                        .foregroundStyle(NotionStyle.textSecondary)
+
+                    Text("•")
+                        .font(.caption)
+                        .foregroundStyle(NotionStyle.textSecondary)
+
                     Text(note.status.rawValue.uppercased())
                         .font(.caption)
                         .foregroundStyle(NotionStyle.textSecondary)
@@ -178,6 +189,15 @@ private struct NotionMenuRow: View {
                             .font(.caption)
                             .foregroundStyle(NotionStyle.textSecondary)
                         Text(note.priority.rawValue.uppercased())
+                            .font(.caption)
+                            .foregroundStyle(NotionStyle.textSecondary)
+                    }
+
+                    if note.kind == .task, let due = note.dueAt {
+                        Text("•")
+                            .font(.caption)
+                            .foregroundStyle(NotionStyle.textSecondary)
+                        Text("Due \(due.formatted(date: .abbreviated, time: .omitted))")
                             .font(.caption)
                             .foregroundStyle(NotionStyle.textSecondary)
                     }
@@ -191,6 +211,11 @@ private struct NotionMenuRow: View {
                     Text("Needs review")
                         .font(.caption)
                         .foregroundStyle(Color.black.opacity(0.55))
+                } else if !note.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(note.summary)
+                        .font(.caption)
+                        .foregroundStyle(Color.black.opacity(0.55))
+                        .lineLimit(1)
                 } else {
                     HStack(spacing: 8) {
                         if note.pinned {

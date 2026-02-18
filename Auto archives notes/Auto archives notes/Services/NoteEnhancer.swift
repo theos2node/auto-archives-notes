@@ -24,8 +24,15 @@ struct NoteEnhancement: Sendable {
     var kind: NoteKind
     var status: NoteStatus
     var priority: NotePriority
+    var area: NoteArea
     var project: String
     var people: [String]
+
+    // Deeper organization.
+    var dueAt: Date?
+    var summary: String
+    var actionItems: [String]
+    var links: [String]
 }
 
 protocol NoteEnhancer: Sendable {
@@ -73,6 +80,13 @@ final class LocalHeuristicEnhancer: NoteEnhancer, @unchecked Sendable {
         let tags = makeTags(from: corrected)
         let emoji = pickEmoji(title: title, tags: tags)
         let classification = classify(rawText: trimmed, correctedText: corrected, tags: tags, title: title)
+        let area = classifyArea(rawText: trimmed, correctedText: corrected, tags: tags, title: title)
+        let links = extractLinks(from: corrected)
+        let summary = makeSummary(from: corrected, title: title)
+        var actionItems = extractActionItems(from: corrected)
+        if actionItems.isEmpty, classification.kind == .task {
+            actionItems = [title]
+        }
 
         return NoteEnhancement(
             correctedText: corrected,
@@ -82,8 +96,13 @@ final class LocalHeuristicEnhancer: NoteEnhancer, @unchecked Sendable {
             kind: classification.kind,
             status: classification.status,
             priority: classification.priority,
+            area: area,
             project: classification.project,
-            people: classification.people
+            people: classification.people,
+            dueAt: nil,
+            summary: summary,
+            actionItems: Array(actionItems.prefix(7)),
+            links: links
         )
     }
 
@@ -223,6 +242,69 @@ final class LocalHeuristicEnhancer: NoteEnhancer, @unchecked Sendable {
             return a.key < b.key
         }
         return Array(sorted.prefix(limit).map(\.key))
+    }
+
+    nonisolated private func makeSummary(from s: String, title: String) -> String {
+        let base = firstMeaningfulChunk(in: s) ?? title
+        let compact = base
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        let words = compact.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).map(String.init)
+        return words.prefix(20).joined(separator: " ")
+    }
+
+    nonisolated private func extractActionItems(from s: String) -> [String] {
+        let lines = s
+            .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var out: [String] = []
+        for line in lines {
+            var t = line
+            if t.hasPrefix("- [ ]") { t = String(t.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines) }
+            if t.lowercased().hasPrefix("todo") {
+                t = t.replacingOccurrences(of: #"(?i)^todo:?\s*"#, with: "", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if t.hasPrefix("- ") || t.hasPrefix("* ") || t.hasPrefix("• ") {
+                t = String(t.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if t.count < 6 { continue }
+            // Heuristic: treat imperative-ish lines as action items.
+            let firstWord = t.split(separator: " ").first.map(String.init)?.lowercased() ?? ""
+            if ["call", "email", "text", "schedule", "book", "buy", "review", "fix", "ship", "write", "send", "follow", "plan", "pay", "submit", "refactor", "draft"].contains(firstWord) {
+                out.append(t)
+            }
+            if out.count == 7 { break }
+        }
+        return out
+    }
+
+    nonisolated private func extractLinks(from s: String) -> [String] {
+        let pattern = #"https?://[^\s\)\]\}>"']+"#
+        let r = try? NSRegularExpression(pattern: pattern, options: [])
+        let ns = s as NSString
+        let matches = r?.matches(in: s, options: [], range: NSRange(location: 0, length: ns.length)) ?? []
+        var out: [String] = []
+        for m in matches {
+            let url = ns.substring(with: m.range)
+            if !out.contains(url) { out.append(url) }
+            if out.count == 3 { break }
+        }
+        return out
+    }
+
+    nonisolated private func classifyArea(rawText: String, correctedText: String, tags: [String], title: String) -> NoteArea {
+        let hay = "\(rawText)\n\(correctedText)\n\(title)\n\(tags.joined(separator: " "))".lowercased()
+        func hasAny(_ words: [String]) -> Bool { words.contains(where: { hay.contains($0) }) }
+        if hasAny(["invoice", "tax", "rent", "budget", "bank", "payment", "paypal", "venmo", "stripe"]) { return .finance }
+        if hasAny(["doctor", "dentist", "gym", "workout", "run", "sleep", "medication", "therapy", "health"]) { return .health }
+        if hasAny(["study", "learn", "course", "read", "book", "notes", "research"]) { return .learning }
+        if hasAny(["meeting", "client", "deadline", "sprint", "jira", "ticket", "ship", "launch", "roadmap", "work"]) { return .work }
+        if hasAny(["family", "friends", "vacation", "travel", "home", "personal"]) { return .personal }
+        if hasAny(["dmv", "insurance", "subscription", "admin", "password", "billing"]) { return .admin }
+        return .other
     }
 
     nonisolated private func makeTags(from s: String) -> [String] {

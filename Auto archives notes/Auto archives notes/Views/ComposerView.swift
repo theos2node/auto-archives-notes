@@ -230,8 +230,13 @@ struct ComposerView: View {
             kind: .idea,
             status: .inbox,
             priority: .p3,
+            area: .other,
             project: "",
-            people: []
+            people: [],
+            dueAt: nil,
+            summary: "",
+            actionItems: [],
+            links: []
         )
         modelContext.insert(note)
         do { try modelContext.save() } catch { /* non-fatal */ }
@@ -262,8 +267,13 @@ struct ComposerView: View {
                             note.kind = enhancement.kind
                             note.status = enhancement.status
                             note.priority = enhancement.priority
+                            note.area = enhancement.area
                             note.project = enhancement.project
                             note.people = enhancement.people
+                            note.dueAt = enhancement.dueAt
+                            note.summary = enhancement.summary
+                            note.actionItems = enhancement.actionItems
+                            note.links = enhancement.links
                             note.isEnhancing = false
                             note.enhancementError = nil
                             try? modelContext.save()

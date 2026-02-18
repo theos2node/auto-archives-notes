@@ -15,20 +15,10 @@ struct NoteRowView: View {
                 .frame(width: 28, alignment: .center)
                 .accessibilityLabel("Emoji")
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(note.displayTitle)
-                    .font(.system(.body, design: .rounded))
-                    .lineLimit(1)
-
-                if !note.tags.isEmpty {
-                    Text(note.tags.prefix(3).joined(separator: " "))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
+            Text(note.displayTitle)
+                .font(.system(.body, design: .rounded))
+                .lineLimit(1)
         }
         .padding(.vertical, 4)
     }
 }
-

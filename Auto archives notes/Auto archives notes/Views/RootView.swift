@@ -21,12 +21,11 @@ struct RootView: View {
                 NoteDetailView(note: note)
             } else {
                 NewNoteView(enhancer: enhancer) { created in
-                    // After submit: show the newly created note on macOS/iPad;
-                    // user can immediately confirm the title/emoji/tags.
-                    selectedNoteID = created.id
+                    // Submit-and-forget: keep the editor open for the next thought.
+                    // The new note will appear immediately in the list.
+                    selectedNoteID = nil
                 }
             }
         }
     }
 }
-

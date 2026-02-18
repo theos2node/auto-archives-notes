@@ -39,8 +39,13 @@ struct NewNoteView: View {
                 .disabled(isSubmitting || rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .alert("Submit failed", isPresented: .constant(errorMessage != nil), actions: {
-            Button("OK") { errorMessage = nil }
+        .alert("Submit failed", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { isPresented in
+                if !isPresented { errorMessage = nil }
+            }
+        ), actions: {
+            Button("OK", role: .cancel) { errorMessage = nil }
         }, message: {
             Text(errorMessage ?? "")
         })
@@ -112,4 +117,3 @@ struct NewNoteView: View {
         }
     }
 }
-

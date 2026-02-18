@@ -11,6 +11,37 @@ struct NoteDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                if note.isEnhancing {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Enhancing…")
+                            .font(.system(.headline, design: .rounded))
+                        Spacer()
+                    }
+                    .padding(12)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(.quaternary, lineWidth: 1)
+                    )
+                } else if let err = note.enhancementError, !err.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Enhancement failed")
+                            .font(.system(.headline, design: .rounded))
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    .padding(12)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(.quaternary, lineWidth: 1)
+                    )
+                }
+
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(note.displayEmoji)
                         .font(.system(size: 34))
@@ -50,4 +81,3 @@ struct NoteDetailView: View {
         .navigationTitle(note.displayTitle)
     }
 }
-

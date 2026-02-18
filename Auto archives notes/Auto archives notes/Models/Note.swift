@@ -12,6 +12,8 @@ import SwiftData
 final class Note {
     @Attribute(.unique) var id: UUID
     var createdAt: Date
+    var isEnhancing: Bool
+    var enhancementError: String?
 
     // Capture
     var rawText: String
@@ -25,6 +27,8 @@ final class Note {
     init(
         id: UUID = UUID(),
         createdAt: Date = Date(),
+        isEnhancing: Bool = false,
+        enhancementError: String? = nil,
         rawText: String,
         title: String,
         emoji: String,
@@ -33,6 +37,8 @@ final class Note {
     ) {
         self.id = id
         self.createdAt = createdAt
+        self.isEnhancing = isEnhancing
+        self.enhancementError = enhancementError
         self.rawText = rawText
         self.title = title
         self.emoji = emoji
@@ -53,13 +59,20 @@ final class Note {
     }
 
     var displayTitle: String {
+        if isEnhancing { return "Enhancing…" }
+        if enhancementError != nil { return displayTitleOr("Needs review") }
+        return displayTitleOr("Untitled")
+    }
+
+    private func displayTitleOr(_ fallback: String) -> String {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.isEmpty ? "Untitled" : t
+        return t.isEmpty ? fallback : t
     }
 
     var displayEmoji: String {
+        if isEnhancing { return "⏳" }
+        if enhancementError != nil { return "⚠️" }
         let e = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
         return e.isEmpty ? "📝" : e
     }
 }
-

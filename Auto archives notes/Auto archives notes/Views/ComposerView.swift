@@ -17,12 +17,20 @@ struct ComposerView: View {
     @State private var errorMessage: String?
 
     @FocusState private var isEditorFocused: Bool
+    private let minimumProcessingTime: Duration = .seconds(1.5)
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            editor
-            footer
+        ZStack {
+            VStack(spacing: 0) {
+                header
+                editor
+                footer
+            }
+
+            if isSubmitting {
+                processingOverlay
+                    .transition(.opacity)
+            }
         }
         .onAppear { isEditorFocused = true }
         .alert("Submit failed", isPresented: Binding(
@@ -74,6 +82,7 @@ struct ComposerView: View {
                 .scrollContentBackground(.hidden)
                 .padding(14)
                 .background(.clear)
+                .disabled(isSubmitting)
 
             if rawText.isEmpty {
                 Text("Write a thought, an idea, a to-do, anything…")
@@ -110,39 +119,82 @@ struct ComposerView: View {
         .background(.thinMaterial)
     }
 
+    private var processingOverlay: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.regular)
+
+            Text("Enhancing your note…")
+                .font(.system(.headline, design: .rounded))
+
+            Text("Give it a minute. I’d rather be good than fast.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .padding(18)
+        .frame(maxWidth: 420)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(.quaternary, lineWidth: 1)
+        )
+    }
+
     private func submit() {
         if isSubmitting { return }
-        let input = rawText
+        let input = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if input.isEmpty { return }
 
         isSubmitting = true
         errorMessage = nil
+        rawText = ""
+        isEditorFocused = false
 
-        Task {
+        // Create immediately so the dashboard updates, then patch it once enhancement completes.
+        let note = Note(
+            isEnhancing: true,
+            enhancementError: nil,
+            rawText: input,
+            title: "",
+            emoji: "",
+            tags: [],
+            enhancedText: "Enhancing with on-device intelligence…\n\nGive it a minute."
+        )
+        modelContext.insert(note)
+        do { try modelContext.save() } catch { /* non-fatal */ }
+
+        Task { @MainActor in
+            let clock = ContinuousClock()
+            let startedAt = clock.now
             do {
                 let enhancement = try await enhancer.enhance(rawText: input)
-                let note = Note(
-                    rawText: input,
-                    title: enhancement.title,
-                    emoji: enhancement.emoji,
-                    tags: enhancement.tags,
-                    enhancedText: enhancement.correctedText
-                )
-                modelContext.insert(note)
-                try modelContext.save()
+                let elapsed = clock.now - startedAt
+                if elapsed < minimumProcessingTime {
+                    try? await Task.sleep(for: minimumProcessingTime - elapsed)
+                }
 
-                await MainActor.run {
-                    rawText = ""
-                    isSubmitting = false
-                    isEditorFocused = true
-                    onSubmitted?()
-                }
+                note.title = enhancement.title
+                note.emoji = enhancement.emoji
+                note.tags = enhancement.tags
+                note.enhancedText = enhancement.correctedText
+                note.isEnhancing = false
+                note.enhancementError = nil
+                do { try modelContext.save() } catch { /* non-fatal */ }
+
+                isSubmitting = false
+                isEditorFocused = true
+                onSubmitted?()
             } catch {
-                await MainActor.run {
-                    isSubmitting = false
-                    errorMessage = String(describing: error)
-                }
+                // Keep the raw note, but mark it failed and show original.
+                note.isEnhancing = false
+                note.enhancementError = String(describing: error)
+                note.enhancedText = note.rawText
+                do { try modelContext.save() } catch { /* non-fatal */ }
+
+                isSubmitting = false
+                isEditorFocused = true
+                errorMessage = String(describing: error)
             }
         }
     }
 }
-

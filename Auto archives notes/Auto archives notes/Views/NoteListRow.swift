@@ -21,8 +21,14 @@ struct NoteListRow: View {
             Text(note.displayTitle)
                 .font(.system(.body, design: .rounded))
                 .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            if note.isEnhancing {
+                ProgressView()
+                    .controlSize(.mini)
+            }
         }
         .padding(.vertical, 4)
     }
 }
-

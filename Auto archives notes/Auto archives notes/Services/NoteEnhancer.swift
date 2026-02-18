@@ -54,9 +54,12 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
 
         // Multi-pass enhancement (local fallback). Replace with Apple's on-device foundation model call later.
         var corrected = normalizeWhitespace(in: trimmed)
+        corrected = improveCasingAndPunctuation(in: corrected)
         if effort == .max {
             corrected = spellCorrect(corrected)
+            corrected = improveCasingAndPunctuation(in: corrected)
             corrected = normalizeWhitespace(in: corrected)
+            await Task.yield()
         }
 
         let title = makeTitle(from: corrected, fallbackRaw: trimmed)
@@ -204,28 +207,48 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
     }
 
     private func makeTags(from s: String) -> [String] {
-        let tokenizer = NLTokenizer(unit: .word)
-        tokenizer.string = s
+        var out: [String] = []
 
-        var freq: [String: Int] = [:]
-        tokenizer.enumerateTokens(in: s.startIndex..<s.endIndex) { range, _ in
-            let w0 = String(s[range]).lowercased()
-            let w = w0.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-            if w.count < 4 { return true }
-            if stopwords.contains(w) { return true }
-            freq[w, default: 0] += 1
-            return true
+        // Prefer semantic keywords first.
+        let keywords = topKeywords(in: s, limit: 10)
+        for k in keywords {
+            let t = "#\(k.lowercased())"
+            if !out.contains(t) { out.append(t) }
         }
 
-        let sorted = freq
-            .sorted { a, b in
-                if a.value != b.value { return a.value > b.value }
-                return a.key < b.key
-            }
-            .map(\.key)
+        if out.count < 6 {
+            // Fall back to frequency-based words.
+            let tokenizer = NLTokenizer(unit: .word)
+            tokenizer.string = s
 
-        // Light normalization: prefer short, human tags.
-        return sorted.prefix(12).map { "#\($0)" }
+            var freq: [String: Int] = [:]
+            tokenizer.enumerateTokens(in: s.startIndex..<s.endIndex) { range, _ in
+                let w0 = String(s[range]).lowercased()
+                let w = w0.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+                if w.count < 4 { return true }
+                if stopwords.contains(w) { return true }
+                freq[w, default: 0] += 1
+                return true
+            }
+
+            let sorted = freq
+                .sorted { a, b in
+                    if a.value != b.value { return a.value > b.value }
+                    return a.key < b.key
+                }
+                .map(\.key)
+
+            for w in sorted {
+                let t = "#\(w)"
+                if !out.contains(t) { out.append(t) }
+                if out.count >= 12 { break }
+            }
+        }
+
+        if out.isEmpty { out = ["#inbox", "#note", "#thought"] }
+        if out.count == 1 { out.append("#inbox") }
+        if out.count == 2 { out.append("#thought") }
+        return out.prefix(12).map { $0 }
     }
 
     private func pickEmoji(title: String, tags: [String]) -> String {
@@ -258,19 +281,16 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
         let checker = NSSpellChecker.shared
         var replacements: [(NSRange, String)] = []
 
-        // Walk words using NSString linguistic units.
         ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: [.byWords]) { substring, range, _, _ in
             guard let substring else { return }
             if range.length < 4 { return }
-            let word = substring
             let lowered = substring.lowercased()
             if self.stopwords.contains(lowered) { return }
 
-            let misspelledRange = checker.checkSpelling(of: word, startingAt: 0)
+            let misspelledRange = checker.checkSpelling(of: substring, startingAt: 0)
             if misspelledRange.location == NSNotFound { return }
-            let guesses = checker.guesses(forWordRange: misspelledRange, in: word, language: "en_US", inSpellDocumentWithTag: 0) ?? []
+            let guesses = checker.guesses(forWordRange: misspelledRange, in: substring, language: "en_US", inSpellDocumentWithTag: 0) ?? []
             guard let replacement = guesses.first, replacement.lowercased() != lowered else { return }
-
             replacements.append((range, replacement))
         }
 
@@ -293,13 +313,12 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
         ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: [.byWords]) { substring, range, _, _ in
             guard let substring else { return }
             if range.length < 4 { return }
-            let word = substring
             let lowered = substring.lowercased()
             if self.stopwords.contains(lowered) { return }
 
-            let miss = checker.rangeOfMisspelledWord(in: word, range: NSRange(location: 0, length: (word as NSString).length), startingAt: 0, wrap: false, language: "en_US")
+            let miss = checker.rangeOfMisspelledWord(in: substring, range: NSRange(location: 0, length: (substring as NSString).length), startingAt: 0, wrap: false, language: "en_US")
             if miss.location == NSNotFound { return }
-            let guesses = checker.guesses(forWordRange: miss, in: word, language: "en_US") ?? []
+            let guesses = checker.guesses(forWordRange: miss, in: substring, language: "en_US") ?? []
             guard let replacement = guesses.first, replacement.lowercased() != lowered else { return }
             replacements.append((range, replacement))
         }
@@ -313,4 +332,57 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
         return mut as String
     }
     #endif
+
+    private func improveCasingAndPunctuation(in s: String) -> String {
+        var out = s
+
+        // Fix common spacing before punctuation.
+        out = out.replacingOccurrences(of: " ,", with: ",")
+        out = out.replacingOccurrences(of: " .", with: ".")
+        out = out.replacingOccurrences(of: " !", with: "!")
+        out = out.replacingOccurrences(of: " ?", with: "?")
+        out = out.replacingOccurrences(of: " ;", with: ";")
+        out = out.replacingOccurrences(of: " :", with: ":")
+
+        // Normalize " i " -> " I " when it's a standalone word.
+        out = out.replacingOccurrences(of: #"\bi\b"#, with: "I", options: [.regularExpression])
+
+        // Capitalize the first letter of the text and letters after sentence endings.
+        let chars = Array(out)
+        var rebuilt: [Character] = []
+        rebuilt.reserveCapacity(chars.count)
+
+        var shouldCapitalize = true
+        var i = 0
+        while i < chars.count {
+            let c = chars[i]
+
+            if shouldCapitalize {
+                if c == " " || c == "\t" || c == "\n" || c == "\r" {
+                    rebuilt.append(c)
+                    i += 1
+                    continue
+                }
+                if let scalar = c.unicodeScalars.first, CharacterSet.letters.contains(scalar) {
+                    rebuilt.append(Character(String(c).uppercased()))
+                    shouldCapitalize = false
+                    i += 1
+                    continue
+                }
+                rebuilt.append(c)
+                i += 1
+                continue
+            }
+
+            rebuilt.append(c)
+            if c == "." || c == "!" || c == "?" || c == "\n" {
+                shouldCapitalize = true
+            }
+            i += 1
+        }
+
+        out = String(rebuilt)
+        out = out.replacingOccurrences(of: #"[ \t]{2,}"#, with: " ", options: [.regularExpression])
+        return out
+    }
 }

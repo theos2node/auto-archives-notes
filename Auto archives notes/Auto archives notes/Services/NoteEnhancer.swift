@@ -19,6 +19,13 @@ struct NoteEnhancement: Sendable {
     var title: String
     var emoji: String
     var tags: [String]
+
+    // Classification (Notion-like).
+    var kind: NoteKind
+    var status: NoteStatus
+    var priority: NotePriority
+    var project: String
+    var people: [String]
 }
 
 protocol NoteEnhancer: Sendable {
@@ -65,12 +72,18 @@ final class LocalHeuristicEnhancer: NoteEnhancer, @unchecked Sendable {
         let title = makeTitle(from: corrected, fallbackRaw: trimmed)
         let tags = makeTags(from: corrected)
         let emoji = pickEmoji(title: title, tags: tags)
+        let classification = classify(rawText: trimmed, correctedText: corrected, tags: tags, title: title)
 
         return NoteEnhancement(
             correctedText: corrected,
             title: title,
             emoji: emoji,
-            tags: Array(tags.prefix(3))
+            tags: Array(tags.prefix(3)),
+            kind: classification.kind,
+            status: classification.status,
+            priority: classification.priority,
+            project: classification.project,
+            people: classification.people
         )
     }
 
@@ -390,5 +403,46 @@ final class LocalHeuristicEnhancer: NoteEnhancer, @unchecked Sendable {
         out = String(rebuilt)
         out = out.replacingOccurrences(of: #"[ \t]{2,}"#, with: " ", options: [.regularExpression])
         return out
+    }
+
+    nonisolated private func classify(
+        rawText: String,
+        correctedText: String,
+        tags: [String],
+        title: String
+    ) -> (kind: NoteKind, status: NoteStatus, priority: NotePriority, project: String, people: [String]) {
+        let hay = (rawText + "\n" + correctedText + "\n" + title + "\n" + tags.joined(separator: " ")).lowercased()
+
+        // Task heuristics.
+        let looksLikeTask =
+            hay.contains("todo") ||
+            hay.contains("to-do") ||
+            hay.contains("task") ||
+            hay.contains("- [ ]") ||
+            hay.contains("deadline") ||
+            hay.contains("due ")
+
+        if looksLikeTask {
+            let priority: NotePriority
+            if hay.contains("p1") || hay.contains("urgent") || hay.contains("asap") { priority = .p1 }
+            else if hay.contains("p2") { priority = .p2 }
+            else { priority = .p3 }
+
+            return (kind: .task, status: .next, priority: priority, project: "", people: [])
+        }
+
+        if hay.contains("meeting") || hay.contains("agenda") || hay.contains("minutes") {
+            return (kind: .meeting, status: .inbox, priority: .p3, project: "", people: [])
+        }
+
+        if hay.contains("journal") || hay.contains("today i") || hay.contains("felt ") {
+            return (kind: .journal, status: .inbox, priority: .p3, project: "", people: [])
+        }
+
+        if hay.contains("http://") || hay.contains("https://") || hay.contains("reference") {
+            return (kind: .reference, status: .inbox, priority: .p3, project: "", people: [])
+        }
+
+        return (kind: .idea, status: .inbox, priority: .p3, project: "", people: [])
     }
 }

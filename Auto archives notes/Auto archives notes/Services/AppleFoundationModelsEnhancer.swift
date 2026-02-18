@@ -82,7 +82,17 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
             // Pass 2: generate compact metadata (title, emoji, tags).
-            let meta = try await s.respond(
+            let taggingModel = SystemLanguageModel(useCase: .contentTagging, guardrails: .permissiveContentTransformations)
+            try ensureAvailable(taggingModel)
+            let taggingSession = LanguageModelSession(model: taggingModel, tools: []) {
+                """
+                You generate accurate, structured classifications and metadata for notes.
+                Be concrete. Prefer specific tags over generic ones.
+                """
+            }
+
+            opts.maximumResponseTokens = 500
+            let meta = try await taggingSession.respond(
                 to: metadataPrompt(correctedText: corrected),
                 generating: NoteMetadata.self,
                 options: opts
@@ -91,12 +101,22 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
             let title = normalizeTitle(meta.title, correctedText: corrected)
             let emoji = normalizeEmoji(meta.emoji)
             let tags = await normalizeTags(meta.tags, correctedText: corrected)
+            let kind = normalizeKind(meta.kind)
+            let status = normalizeStatus(meta.status, kind: kind)
+            let priority = normalizePriority(meta.priority, kind: kind)
+            let project = meta.project.trimmingCharacters(in: .whitespacesAndNewlines)
+            let people = normalizePeople(meta.people)
 
             return NoteEnhancement(
                 correctedText: corrected.isEmpty ? trimmed : corrected,
                 title: title,
                 emoji: emoji,
-                tags: tags
+                tags: tags,
+                kind: kind,
+                status: status,
+                priority: priority,
+                project: project,
+                people: people
             )
         }
 
@@ -106,6 +126,11 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
             - title: no more than 5 words
             - emoji: exactly 1 emoji that matches the note
             - tags: exactly 3 short tags, each starting with '#', based on the content (not generic)
+            - kind: one of [idea, task, meeting, journal, reference]
+            - status: one of [inbox, next, later, done]
+            - priority: one of [p1, p2, p3] (if kind is task; otherwise use p3)
+            - project: a short project name if clearly applicable, otherwise empty string
+            - people: 0-3 names if explicitly mentioned, otherwise []
 
             NOTE:
             \(correctedText)
@@ -139,6 +164,51 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
             if trimmed.isEmpty { return "📝" }
             // Keep first scalar cluster; don't try to be perfect about emoji detection.
             return String(trimmed.prefix(2))
+        }
+
+        private func normalizeKind(_ s: String) -> NoteKind {
+            switch s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "task": return .task
+            case "meeting": return .meeting
+            case "journal": return .journal
+            case "reference": return .reference
+            default: return .idea
+            }
+        }
+
+        private func normalizeStatus(_ s: String, kind: NoteKind) -> NoteStatus {
+            let v = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            switch v {
+            case "done": return .done
+            case "later": return .later
+            case "next": return .next
+            case "inbox": return .inbox
+            default:
+                // Tasks default to next; others to inbox.
+                return kind == .task ? .next : .inbox
+            }
+        }
+
+        private func normalizePriority(_ s: String, kind: NoteKind) -> NotePriority {
+            if kind != .task { return .p3 }
+            switch s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "p1": return .p1
+            case "p2": return .p2
+            default: return .p3
+            }
+        }
+
+        private func normalizePeople(_ people: [String]) -> [String] {
+            var out: [String] = []
+            for p in people {
+                let t = p.trimmingCharacters(in: .whitespacesAndNewlines)
+                if t.isEmpty { continue }
+                if !out.contains(where: { $0.caseInsensitiveCompare(t) == .orderedSame }) {
+                    out.append(t)
+                }
+                if out.count == 3 { break }
+            }
+            return out
         }
 
         private func normalizeTags(_ tags: [String], correctedText: String) async -> [String] {
@@ -184,6 +254,11 @@ struct NoteMetadata {
     var title: String
     var emoji: String
     var tags: [String]
+    var kind: String
+    var status: String
+    var priority: String
+    var project: String
+    var people: [String]
 }
 
 @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)

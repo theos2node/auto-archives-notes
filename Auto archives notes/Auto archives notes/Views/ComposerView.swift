@@ -109,7 +109,12 @@ struct ComposerView: View {
             title: "",
             emoji: "",
             tags: [],
-            enhancedText: "Enhancing with on-device intelligence…\n\nGive it a minute."
+            enhancedText: "Enhancing with on-device intelligence…\n\nGive it a minute.",
+            kind: .idea,
+            status: .inbox,
+            priority: .p3,
+            project: "",
+            people: []
         )
         modelContext.insert(note)
         do { try modelContext.save() } catch { /* non-fatal */ }
@@ -131,6 +136,11 @@ struct ComposerView: View {
                 note.emoji = enhancement.emoji
                 note.tags = enhancement.tags
                 note.enhancedText = enhancement.correctedText
+                note.kind = enhancement.kind
+                note.status = enhancement.status
+                note.priority = enhancement.priority
+                note.project = enhancement.project
+                note.people = enhancement.people
                 note.isEnhancing = false
                 note.enhancementError = nil
                 do { try modelContext.save() } catch { /* non-fatal */ }

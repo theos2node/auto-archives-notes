@@ -12,6 +12,8 @@ struct MainMenuView: View {
     var onNewNote: (() -> Void)?
     var onOpenNote: ((UUID) -> Void)?
 
+    @State private var view: MenuView = .inbox
+
     var body: some View {
         NotionPage(topBar: AnyView(topBar)) {
             if notes.isEmpty {
@@ -20,14 +22,14 @@ struct MainMenuView: View {
             } else {
                 NotionCard {
                     VStack(spacing: 0) {
-                        ForEach(notes) { note in
+                        ForEach(filteredNotes) { note in
                             NotionMenuRow(note: note) {
                                 onOpenNote?(note.id)
                             } onDelete: {
                                 delete(note)
                             }
 
-                            if note.id != notes.last?.id {
+                            if note.id != filteredNotes.last?.id {
                                 Divider().opacity(0.6)
                             }
                         }
@@ -39,20 +41,34 @@ struct MainMenuView: View {
     }
 
     private var topBar: some View {
-        HStack(spacing: 10) {
-            Text("Notes")
-                .font(.system(.title3, design: .rounded).weight(.semibold))
-                .foregroundStyle(Color.black.opacity(0.86))
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                Text("Notes")
+                    .font(.system(.title3, design: .rounded).weight(.semibold))
+                    .foregroundStyle(Color.black.opacity(0.86))
 
-            Spacer()
+                Spacer()
 
-            Button {
-                onNewNote?()
-            } label: {
-                Text("New note")
+                Button {
+                    onNewNote?()
+                } label: {
+                    Text("New note")
+                }
+                .buttonStyle(NotionPillButtonStyle(prominent: true))
+                .keyboardShortcut("n", modifiers: [.command])
             }
-            .buttonStyle(NotionPillButtonStyle(prominent: true))
-            .keyboardShortcut("n", modifiers: [.command])
+
+            HStack(spacing: 8) {
+                ForEach(MenuView.allCases, id: \.self) { v in
+                    Button {
+                        view = v
+                    } label: {
+                        Text(v.label)
+                    }
+                    .buttonStyle(NotionPillButtonStyle(prominent: view == v))
+                }
+                Spacer()
+            }
         }
     }
 
@@ -71,6 +87,30 @@ struct MainMenuView: View {
     private func delete(_ note: Note) {
         modelContext.delete(note)
         do { try modelContext.save() } catch { /* non-fatal */ }
+    }
+
+    private var filteredNotes: [Note] {
+        let base = notes.sorted { a, b in
+            if a.pinned != b.pinned { return a.pinned && !b.pinned }
+            return a.createdAt > b.createdAt
+        }
+
+        switch view {
+        case .inbox:
+            return base.filter { $0.status == .inbox }
+        case .tasks:
+            return base.filter { $0.kind == .task && $0.status != .done }
+        case .ideas:
+            return base.filter { $0.kind == .idea }
+        case .meetings:
+            return base.filter { $0.kind == .meeting }
+        case .done:
+            return base.filter { $0.status == .done }
+        case .all:
+            return base
+        case .pinned:
+            return base.filter { $0.pinned }
+        }
     }
 }
 
@@ -93,6 +133,29 @@ private struct NotionMenuRow: View {
                     .foregroundStyle(Color.black.opacity(0.86))
                     .lineLimit(1)
 
+                HStack(spacing: 8) {
+                    Text(note.kind.rawValue.capitalized)
+                        .font(.caption)
+                        .foregroundStyle(NotionStyle.textSecondary)
+
+                    Text("•")
+                        .font(.caption)
+                        .foregroundStyle(NotionStyle.textSecondary)
+
+                    Text(note.status.rawValue.uppercased())
+                        .font(.caption)
+                        .foregroundStyle(NotionStyle.textSecondary)
+
+                    if note.kind == .task {
+                        Text("•")
+                            .font(.caption)
+                            .foregroundStyle(NotionStyle.textSecondary)
+                        Text(note.priority.rawValue.uppercased())
+                            .font(.caption)
+                            .foregroundStyle(NotionStyle.textSecondary)
+                    }
+                }
+
                 if note.isEnhancing {
                     Text("Enhancing…")
                         .font(.caption)
@@ -102,9 +165,25 @@ private struct NotionMenuRow: View {
                         .font(.caption)
                         .foregroundStyle(Color.black.opacity(0.55))
                 } else {
-                    Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
-                        .font(.caption)
-                        .foregroundStyle(NotionStyle.textSecondary)
+                    HStack(spacing: 8) {
+                        if note.pinned {
+                            Text("Pinned")
+                                .font(.caption)
+                                .foregroundStyle(Color.black.opacity(0.55))
+                        }
+                        Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption)
+                            .foregroundStyle(NotionStyle.textSecondary)
+                        if !note.project.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text("•")
+                                .font(.caption)
+                                .foregroundStyle(NotionStyle.textSecondary)
+                            Text(note.project)
+                                .font(.caption)
+                                .foregroundStyle(NotionStyle.textSecondary)
+                                .lineLimit(1)
+                        }
+                    }
                 }
             }
 
@@ -113,6 +192,17 @@ private struct NotionMenuRow: View {
             if note.isEnhancing {
                 ProgressView().controlSize(.small)
             }
+
+            Button {
+                togglePin()
+            } label: {
+                Image(systemName: note.pinned ? "pin.fill" : "pin")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.black.opacity(note.pinned ? 0.55 : 0.35))
+                    .padding(8)
+            }
+            .buttonStyle(.plain)
+            .opacity(hovered ? 1 : 0)
 
             Button {
                 onDelete()
@@ -131,5 +221,34 @@ private struct NotionMenuRow: View {
         .contentShape(Rectangle())
         .onTapGesture { onOpen() }
         .onHover { hovered = $0 }
+    }
+
+    @Environment(\.modelContext) private var modelContext
+
+    private func togglePin() {
+        note.pinned.toggle()
+        do { try modelContext.save() } catch { /* non-fatal */ }
+    }
+}
+
+private enum MenuView: CaseIterable {
+    case inbox
+    case tasks
+    case ideas
+    case meetings
+    case pinned
+    case done
+    case all
+
+    var label: String {
+        switch self {
+        case .inbox: return "Inbox"
+        case .tasks: return "Tasks"
+        case .ideas: return "Ideas"
+        case .meetings: return "Meetings"
+        case .pinned: return "Pinned"
+        case .done: return "Done"
+        case .all: return "All"
+        }
     }
 }

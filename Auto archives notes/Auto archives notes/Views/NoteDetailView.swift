@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct NoteDetailView: View {
     let note: Note
@@ -11,6 +12,8 @@ struct NoteDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             statusBanner
+
+            properties
 
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(note.displayEmoji)
@@ -61,6 +64,89 @@ struct NoteDetailView: View {
         }
     }
 
+    private var properties: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text("Properties")
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                    .foregroundStyle(Color.black.opacity(0.75))
+                Spacer()
+            }
+
+            HStack(spacing: 12) {
+                propertyPicker("Kind", selection: Binding(
+                    get: { note.kind },
+                    set: { note.kind = $0 }
+                ), all: NoteKind.allCases) { $0.rawValue.capitalized }
+
+                propertyPicker("Status", selection: Binding(
+                    get: { note.status },
+                    set: { note.status = $0 }
+                ), all: NoteStatus.allCases) { $0.rawValue.uppercased() }
+
+                propertyPicker("Priority", selection: Binding(
+                    get: { note.priority },
+                    set: { note.priority = $0 }
+                ), all: NotePriority.allCases) { $0.rawValue.uppercased() }
+
+                Spacer()
+            }
+
+            HStack(spacing: 12) {
+                propertyField("Project", text: Binding(
+                    get: { note.project },
+                    set: { note.project = $0 }
+                ))
+
+                propertyField("People", text: Binding(
+                    get: { note.people.joined(separator: ", ") },
+                    set: { note.people = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } }
+                ))
+
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.black.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onChange(of: note.kind) { _, _ in persist() }
+        .onChange(of: note.status) { _, _ in persist() }
+        .onChange(of: note.priority) { _, _ in persist() }
+        .onChange(of: note.project) { _, _ in persist() }
+        .onChange(of: note.peopleCSV) { _, _ in persist() }
+    }
+
+    private func propertyPicker<T: Hashable>(
+        _ label: String,
+        selection: Binding<T>,
+        all: [T],
+        title: @escaping (T) -> String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(NotionStyle.textSecondary)
+            Picker(label, selection: selection) {
+                ForEach(all, id: \.self) { v in
+                    Text(title(v)).tag(v)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+        }
+    }
+
+    private func propertyField(_ label: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(NotionStyle.textSecondary)
+            TextField("", text: text)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 260)
+        }
+    }
+
     @ViewBuilder
     private var statusBanner: some View {
         if note.isEnhancing {
@@ -88,5 +174,10 @@ struct NoteDetailView: View {
             .padding(.vertical, 10)
             .background(Color.black.opacity(0.045), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
+    }
+
+    @Environment(\.modelContext) private var modelContext
+    private func persist() {
+        do { try modelContext.save() } catch { /* non-fatal */ }
     }
 }

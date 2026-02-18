@@ -166,13 +166,13 @@ struct ComposerView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(Color.black.opacity(0.045), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(NotionStyle.fillSubtleHover, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             ScrollView {
                 Text(transcriber.transcript.isEmpty ? "Processing recording…" : transcriber.transcript)
                     .font(.system(size: 16, weight: .regular, design: .default))
                     .lineSpacing(4)
-                    .foregroundStyle(Color.black.opacity(transcriber.transcript.isEmpty ? 0.55 : 0.86))
+                    .foregroundStyle(transcriber.transcript.isEmpty ? NotionStyle.textSecondary : NotionStyle.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
                     .padding(.vertical, 6)
@@ -197,12 +197,12 @@ struct ComposerView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(Color.black.opacity(0.045), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(NotionStyle.fillSubtleHover, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             Text("Tap the microphone again to stop and transcribe.")
                 .font(.system(size: 16, weight: .regular, design: .default))
                 .lineSpacing(4)
-                .foregroundStyle(Color.black.opacity(0.78))
+                .foregroundStyle(NotionStyle.textPrimary)
         }
         .frame(minHeight: 280, alignment: .top)
     }

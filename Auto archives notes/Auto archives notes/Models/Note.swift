@@ -127,7 +127,12 @@ final class Note {
     }
 
     var displayTitle: String {
-        if isEnhancing { return "Enhancing…" }
+        if isEnhancing {
+            let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { return t }
+            let fallback = fallbackTitleFromText(rawText)
+            return fallback.isEmpty ? "Enhancing…" : fallback
+        }
         if enhancementError != nil { return displayTitleOr("Needs review") }
         return displayTitleOr("Untitled")
     }
@@ -137,8 +142,20 @@ final class Note {
         return t.isEmpty ? fallback : t
     }
 
+    private func fallbackTitleFromText(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "" }
+        let cleaned = trimmed.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        let words = cleaned.split(separator: " ")
+        let prefix = words.prefix(5)
+        return prefix.joined(separator: " ")
+    }
+
     var displayEmoji: String {
-        if isEnhancing { return "⏳" }
+        if isEnhancing {
+            let e = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
+            return e.isEmpty ? "⏳" : e
+        }
         if enhancementError != nil { return "⚠️" }
         let e = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
         return e.isEmpty ? "📝" : e

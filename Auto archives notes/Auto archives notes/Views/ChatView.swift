@@ -63,7 +63,7 @@ struct ChatView: View {
                                     }
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 10)
-                                    .background(Color.black.opacity(0.045), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .background(NotionStyle.fillSubtleHover, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                                 }
 
                                 Color.clear.frame(height: 4).id("bottom")
@@ -125,7 +125,7 @@ struct ChatView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Chat")
                 .font(.system(.title3, design: .rounded).weight(.semibold))
-                .foregroundStyle(Color.black.opacity(0.86))
+                .foregroundStyle(NotionStyle.textPrimary)
             Text("Ask questions, retrieve notes, and get grounded answers based on what you wrote.")
                 .font(.system(.subheadline, design: .default))
                 .foregroundStyle(NotionStyle.textSecondary)
@@ -147,7 +147,7 @@ struct ChatView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(Color.black.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(NotionStyle.fillSubtle, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func chatTurn(_ turn: ChatTurn) -> some View {
@@ -158,7 +158,7 @@ struct ChatView: View {
                 Text(turn.question)
                     .font(.system(size: 15, weight: .regular, design: .default))
                     .lineSpacing(3)
-                    .foregroundStyle(Color.black.opacity(0.86))
+                    .foregroundStyle(NotionStyle.textPrimary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .background(Color.black.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -182,7 +182,7 @@ struct ChatView: View {
                 Text(turn.answer)
                     .font(.system(size: 15, weight: .regular, design: .default))
                     .lineSpacing(3)
-                    .foregroundStyle(Color.black.opacity(0.86))
+                    .foregroundStyle(NotionStyle.textPrimary)
                     .textSelection(.enabled)
 
                 if !turn.matchedNoteIDs.isEmpty {
@@ -201,7 +201,7 @@ struct ChatView: View {
                                         .frame(width: 24, alignment: .leading)
                                     Text(note.displayTitle)
                                         .font(.system(size: 14, weight: .semibold, design: .rounded))
-                                        .foregroundStyle(Color.black.opacity(0.86))
+                                        .foregroundStyle(NotionStyle.textPrimary)
                                         .lineLimit(1)
                                     Spacer()
                                     Text(note.kind.rawValue.capitalized)
@@ -210,7 +210,7 @@ struct ChatView: View {
                                 }
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
-                                .background(Color.black.opacity(0.03), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .background(NotionStyle.fillSubtle, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                             }
                             .buttonStyle(.plain)
                         }
@@ -219,7 +219,7 @@ struct ChatView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(Color.black.opacity(0.035), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(NotionStyle.fillSubtle, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 
@@ -273,4 +273,3 @@ struct ChatView: View {
         }
     }
 }
-

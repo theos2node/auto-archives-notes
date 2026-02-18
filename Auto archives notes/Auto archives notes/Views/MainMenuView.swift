@@ -33,7 +33,8 @@ struct MainMenuView: View {
                             }
 
                             if note.id != filteredNotes.last?.id {
-                                Divider().opacity(0.6)
+                                Divider().opacity(0.55)
+                                    .padding(.leading, 54)
                             }
                         }
                     }
@@ -48,18 +49,17 @@ struct MainMenuView: View {
             HStack(spacing: 10) {
                 Text("Notes")
                     .font(.system(.title3, design: .rounded).weight(.semibold))
-                    .foregroundStyle(Color.black.opacity(0.86))
+                    .foregroundStyle(NotionStyle.textPrimary)
 
                 Spacer()
 
-                TextField("Search", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 240)
+                searchField
 
                 Button {
                     onTranscript?()
                 } label: {
                     Image(systemName: "mic")
+                        .font(.system(size: 13, weight: .semibold))
                 }
                 .buttonStyle(NotionPillButtonStyle(prominent: false))
                 .help("Transcript")
@@ -68,6 +68,7 @@ struct MainMenuView: View {
                     onChat?()
                 } label: {
                     Image(systemName: "bubble.left.and.bubble.right")
+                        .font(.system(size: 13, weight: .semibold))
                 }
                 .buttonStyle(NotionPillButtonStyle(prominent: false))
                 .help("Chat")
@@ -81,24 +82,44 @@ struct MainMenuView: View {
                 .keyboardShortcut("n", modifiers: [.command])
             }
 
-            HStack(spacing: 8) {
-                ForEach(MenuView.allCases, id: \.self) { v in
-                    Button {
-                        view = v
-                    } label: {
-                        Text(v.label)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(MenuView.allCases, id: \.self) { v in
+                        Button {
+                            view = v
+                        } label: {
+                            Text(v.label)
+                        }
+                        .buttonStyle(NotionPillButtonStyle(prominent: view == v))
                     }
-                    .buttonStyle(NotionPillButtonStyle(prominent: view == v))
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(NotionStyle.textSecondary)
+            TextField("Search", text: $searchText)
+                .textFieldStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(NotionStyle.fillSubtle, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(NotionStyle.line, lineWidth: 1)
+        )
+        .frame(width: 260)
     }
 
     private var emptyState: some View {
         VStack(spacing: 10) {
             Text("Nothing here yet.")
                 .font(.system(.title3, design: .rounded).weight(.semibold))
+                .foregroundStyle(NotionStyle.textPrimary)
             Text("Capture a thought, submit it, forget it.")
                 .foregroundStyle(NotionStyle.textSecondary)
         }
@@ -169,83 +190,25 @@ private struct NotionMenuRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(note.displayTitle)
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.black.opacity(0.86))
+                    .foregroundStyle(NotionStyle.textPrimary)
                     .lineLimit(1)
 
-                HStack(spacing: 8) {
-                    Text(note.kind.rawValue.capitalized)
-                        .font(.caption)
-                        .foregroundStyle(NotionStyle.textSecondary)
-
-                    Text("•")
-                        .font(.caption)
-                        .foregroundStyle(NotionStyle.textSecondary)
-
-                    Text(note.area.rawValue.capitalized)
-                        .font(.caption)
-                        .foregroundStyle(NotionStyle.textSecondary)
-
-                    Text("•")
-                        .font(.caption)
-                        .foregroundStyle(NotionStyle.textSecondary)
-
-                    Text(note.status.rawValue.uppercased())
-                        .font(.caption)
-                        .foregroundStyle(NotionStyle.textSecondary)
-
+                HStack(spacing: 6) {
+                    NotionChip(text: note.kind.rawValue.capitalized)
+                    NotionChip(text: note.status.rawValue.capitalized)
+                    NotionChip(text: note.area.rawValue.capitalized)
                     if note.kind == .task {
-                        Text("•")
-                            .font(.caption)
-                            .foregroundStyle(NotionStyle.textSecondary)
-                        Text(note.priority.rawValue.uppercased())
-                            .font(.caption)
-                            .foregroundStyle(NotionStyle.textSecondary)
+                        NotionChip(text: note.priority.rawValue.uppercased())
                     }
-
                     if note.kind == .task, let due = note.dueAt {
-                        Text("•")
-                            .font(.caption)
-                            .foregroundStyle(NotionStyle.textSecondary)
-                        Text("Due \(due.formatted(date: .abbreviated, time: .omitted))")
-                            .font(.caption)
-                            .foregroundStyle(NotionStyle.textSecondary)
+                        NotionChip(text: due.formatted(date: .abbreviated, time: .omitted), systemImage: "calendar")
                     }
                 }
 
-                if note.isEnhancing {
-                    Text("Enhancing…")
-                        .font(.caption)
-                        .foregroundStyle(NotionStyle.textSecondary)
-                } else if let err = note.enhancementError, !err.isEmpty {
-                    Text("Needs review")
-                        .font(.caption)
-                        .foregroundStyle(Color.black.opacity(0.55))
-                } else if !note.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(note.summary)
-                        .font(.caption)
-                        .foregroundStyle(Color.black.opacity(0.55))
-                        .lineLimit(1)
-                } else {
-                    HStack(spacing: 8) {
-                        if note.pinned {
-                            Text("Pinned")
-                                .font(.caption)
-                                .foregroundStyle(Color.black.opacity(0.55))
-                        }
-                        Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption)
-                            .foregroundStyle(NotionStyle.textSecondary)
-                        if !note.project.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text("•")
-                                .font(.caption)
-                                .foregroundStyle(NotionStyle.textSecondary)
-                            Text(note.project)
-                                .font(.caption)
-                                .foregroundStyle(NotionStyle.textSecondary)
-                                .lineLimit(1)
-                        }
-                    }
-                }
+                Text(snippet)
+                    .font(.system(size: 13, weight: .regular, design: .default))
+                    .foregroundStyle(NotionStyle.textSecondary)
+                    .lineLimit(2)
             }
 
             Spacer()
@@ -299,6 +262,23 @@ private struct NotionMenuRow: View {
             Button("Delete", role: .destructive) { onDelete() }
             Button("Cancel", role: .cancel) {}
         }
+    }
+
+    private var snippet: String {
+        if note.isEnhancing { return "Running on-device models…" }
+        if let err = note.enhancementError, !err.isEmpty { return "Needs review" }
+        let s = note.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !s.isEmpty { return compactLine(s) }
+        let t = note.enhancedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !t.isEmpty { return compactLine(t) }
+        return note.createdAt.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func compactLine(_ s: String) -> String {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        if t.count <= 140 { return t }
+        return String(t.prefix(140)) + "…"
     }
 
     @Environment(\.modelContext) private var modelContext

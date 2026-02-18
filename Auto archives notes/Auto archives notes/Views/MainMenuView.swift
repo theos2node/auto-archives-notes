@@ -13,6 +13,7 @@ struct MainMenuView: View {
     var onOpenNote: ((UUID) -> Void)?
 
     @State private var view: MenuView = .inbox
+    @State private var searchText: String = ""
 
     var body: some View {
         NotionPage(topBar: AnyView(topBar)) {
@@ -48,6 +49,10 @@ struct MainMenuView: View {
                     .foregroundStyle(Color.black.opacity(0.86))
 
                 Spacer()
+
+                TextField("Search", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 240)
 
                 Button {
                     onNewNote?()
@@ -95,21 +100,33 @@ struct MainMenuView: View {
             return a.createdAt > b.createdAt
         }
 
+        let filteredByView: [Note]
         switch view {
         case .inbox:
-            return base.filter { $0.status == .inbox }
+            filteredByView = base.filter { $0.status == .inbox }
         case .tasks:
-            return base.filter { $0.kind == .task && $0.status != .done }
+            filteredByView = base.filter { $0.kind == .task && $0.status != .done }
         case .ideas:
-            return base.filter { $0.kind == .idea }
+            filteredByView = base.filter { $0.kind == .idea }
         case .meetings:
-            return base.filter { $0.kind == .meeting }
+            filteredByView = base.filter { $0.kind == .meeting }
         case .done:
-            return base.filter { $0.status == .done }
+            filteredByView = base.filter { $0.status == .done }
         case .all:
-            return base
+            filteredByView = base
         case .pinned:
-            return base.filter { $0.pinned }
+            filteredByView = base.filter { $0.pinned }
+        }
+
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty { return filteredByView }
+
+        return filteredByView.filter { note in
+            note.displayTitle.localizedCaseInsensitiveContains(q)
+                || note.enhancedText.localizedCaseInsensitiveContains(q)
+                || note.tagsCSV.localizedCaseInsensitiveContains(q)
+                || note.project.localizedCaseInsensitiveContains(q)
+                || note.peopleCSV.localizedCaseInsensitiveContains(q)
         }
     }
 }
@@ -120,6 +137,7 @@ private struct NotionMenuRow: View {
     let onDelete: () -> Void
 
     @State private var hovered = false
+    @State private var confirmDelete = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -204,8 +222,21 @@ private struct NotionMenuRow: View {
             .buttonStyle(.plain)
             .opacity(hovered ? 1 : 0)
 
+            if note.kind == .task {
+                Button {
+                    toggleDone()
+                } label: {
+                    Image(systemName: note.status == .done ? "checkmark.circle.fill" : "checkmark.circle")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.black.opacity(note.status == .done ? 0.55 : 0.35))
+                        .padding(8)
+                }
+                .buttonStyle(.plain)
+                .opacity(hovered ? 1 : 0)
+            }
+
             Button {
-                onDelete()
+                confirmDelete = true
             } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 12, weight: .semibold))
@@ -221,12 +252,25 @@ private struct NotionMenuRow: View {
         .contentShape(Rectangle())
         .onTapGesture { onOpen() }
         .onHover { hovered = $0 }
+        .confirmationDialog("Delete this note?", isPresented: $confirmDelete) {
+            Button("Delete", role: .destructive) { onDelete() }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 
     @Environment(\.modelContext) private var modelContext
 
     private func togglePin() {
         note.pinned.toggle()
+        do { try modelContext.save() } catch { /* non-fatal */ }
+    }
+
+    private func toggleDone() {
+        if note.status == .done {
+            note.status = .inbox
+        } else {
+            note.status = .done
+        }
         do { try modelContext.save() } catch { /* non-fatal */ }
     }
 }

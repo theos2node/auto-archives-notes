@@ -26,6 +26,22 @@ struct ComposerView: View {
                 editor
                     .padding(.horizontal, 18)
                     .padding(.vertical, 16)
+
+                Divider().opacity(0.65)
+
+                HStack(spacing: 10) {
+                    Text("Cmd+Enter to submit")
+                        .font(.caption)
+                        .foregroundStyle(NotionStyle.textSecondary)
+                    Spacer()
+                    if isSubmitting {
+                        Text("Enhancing in background…")
+                            .font(.caption)
+                            .foregroundStyle(NotionStyle.textSecondary)
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
             }
             .padding(.top, 8)
         }
@@ -102,7 +118,9 @@ struct ComposerView: View {
         isEditorFocused = false
 
         // Create immediately so the dashboard updates, then patch it once enhancement completes.
+        let noteID = UUID()
         let note = Note(
+            id: noteID,
             isEnhancing: true,
             enhancementError: nil,
             rawText: input,
@@ -122,7 +140,7 @@ struct ComposerView: View {
         // Immediately return the user to the main menu, while enhancement continues in the background.
         onSubmitted?()
 
-        Task { @MainActor in
+        Task {
             let clock = ContinuousClock()
             let startedAt = clock.now
             do {
@@ -132,31 +150,55 @@ struct ComposerView: View {
                     try? await Task.sleep(for: minimumProcessingTime - elapsed)
                 }
 
-                note.title = enhancement.title
-                note.emoji = enhancement.emoji
-                note.tags = enhancement.tags
-                note.enhancedText = enhancement.correctedText
-                note.kind = enhancement.kind
-                note.status = enhancement.status
-                note.priority = enhancement.priority
-                note.project = enhancement.project
-                note.people = enhancement.people
-                note.isEnhancing = false
-                note.enhancementError = nil
-                do { try modelContext.save() } catch { /* non-fatal */ }
+                await MainActor.run {
+                    do {
+                        let fetch = FetchDescriptor<Note>(
+                            predicate: #Predicate { $0.id == noteID }
+                        )
+                        if let note = try modelContext.fetch(fetch).first {
+                            note.title = enhancement.title
+                            note.emoji = enhancement.emoji
+                            note.tags = enhancement.tags
+                            note.enhancedText = enhancement.correctedText
+                            note.kind = enhancement.kind
+                            note.status = enhancement.status
+                            note.priority = enhancement.priority
+                            note.project = enhancement.project
+                            note.people = enhancement.people
+                            note.isEnhancing = false
+                            note.enhancementError = nil
+                            try? modelContext.save()
+                        }
+                    } catch {
+                        // If fetch fails, just ignore; note remains in enhancing state.
+                    }
+                }
 
-                isSubmitting = false
-                isEditorFocused = true
+                await MainActor.run {
+                    isSubmitting = false
+                    isEditorFocused = true
+                }
             } catch {
-                // Keep the raw note, but mark it failed and show original.
-                note.isEnhancing = false
-                note.enhancementError = String(describing: error)
-                note.enhancedText = note.rawText
-                do { try modelContext.save() } catch { /* non-fatal */ }
+                await MainActor.run {
+                    // Keep the raw note, but mark it failed and show original.
+                    do {
+                        let fetch = FetchDescriptor<Note>(
+                            predicate: #Predicate { $0.id == noteID }
+                        )
+                        if let note = try modelContext.fetch(fetch).first {
+                            note.isEnhancing = false
+                            note.enhancementError = String(describing: error)
+                            note.enhancedText = note.rawText
+                            try? modelContext.save()
+                        }
+                    } catch {
+                        // ignore
+                    }
 
-                isSubmitting = false
-                isEditorFocused = true
-                errorMessage = String(describing: error)
+                    isSubmitting = false
+                    isEditorFocused = true
+                    errorMessage = String(describing: error)
+                }
             }
         }
     }

@@ -19,28 +19,33 @@ struct AppRootView: View {
     )
 
     var body: some View {
-        switch screen {
-        case .composer:
-            ComposerView(
-                enhancer: enhancer,
-                onGoToMenu: { screen = .menu },
-                onSubmitted: { screen = .menu }
-            )
-            .background(PaperBackground())
+        ZStack {
+            switch screen {
+            case .composer:
+                ComposerView(
+                    enhancer: enhancer,
+                    onGoToMenu: { screen = .menu },
+                    onSubmitted: { screen = .menu }
+                )
+                .transition(.opacity)
 
-        case .menu:
-            MainMenuView(
-                onNewNote: { screen = .composer },
-                onOpenNote: { id in screen = .detail(id) }
-            )
+            case .menu:
+                MainMenuView(
+                    onNewNote: { screen = .composer },
+                    onOpenNote: { id in screen = .detail(id) }
+                )
+                .transition(.opacity)
 
-        case .detail(let id):
-            NoteDetailHostView(
-                noteID: id,
-                onGoToMenu: { screen = .menu },
-                onNewNote: { screen = .composer }
-            )
-            .background(PaperBackground())
+            case .detail(let id):
+                NoteDetailHostView(
+                    noteID: id,
+                    onGoToMenu: { screen = .menu },
+                    onNewNote: { screen = .composer }
+                )
+                .transition(.opacity)
+            }
         }
+        .animation(.snappy(duration: 0.18), value: screen)
+        .preferredColorScheme(.light)
     }
 }

@@ -71,6 +71,13 @@ struct NoteDetailView: View {
                     .font(.system(.subheadline, design: .rounded).weight(.semibold))
                     .foregroundStyle(Color.black.opacity(0.75))
                 Spacer()
+
+                Toggle("Pinned", isOn: Binding(
+                    get: { note.pinned },
+                    set: { note.pinned = $0 }
+                ))
+                .toggleStyle(.switch)
+                .labelsHidden()
             }
 
             HStack(spacing: 12) {
@@ -88,6 +95,7 @@ struct NoteDetailView: View {
                     get: { note.priority },
                     set: { note.priority = $0 }
                 ), all: NotePriority.allCases) { $0.rawValue.uppercased() }
+                .disabled(note.kind != .task)
 
                 Spacer()
             }
@@ -105,6 +113,18 @@ struct NoteDetailView: View {
 
                 Spacer()
             }
+
+            if note.kind == .task {
+                HStack(spacing: 10) {
+                    Button {
+                        note.status = (note.status == .done) ? .inbox : .done
+                    } label: {
+                        Text(note.status == .done ? "Mark not done" : "Mark done")
+                    }
+                    .buttonStyle(NotionPillButtonStyle(prominent: note.status != .done))
+                    Spacer()
+                }
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -114,6 +134,7 @@ struct NoteDetailView: View {
         .onChange(of: note.priority) { _, _ in persist() }
         .onChange(of: note.project) { _, _ in persist() }
         .onChange(of: note.peopleCSV) { _, _ in persist() }
+        .onChange(of: note.pinned) { _, _ in persist() }
     }
 
     private func propertyPicker<T: Hashable>(

@@ -10,6 +10,7 @@ struct MainMenuView: View {
     @Query(sort: \Note.createdAt, order: .reverse) private var notes: [Note]
 
     var onNewNote: (() -> Void)?
+    var onTranscript: (() -> Void)?
     var onOpenNote: ((UUID) -> Void)?
 
     @State private var view: MenuView = .inbox
@@ -53,6 +54,14 @@ struct MainMenuView: View {
                 TextField("Search", text: $searchText)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 240)
+
+                Button {
+                    onTranscript?()
+                } label: {
+                    Image(systemName: "mic")
+                }
+                .buttonStyle(NotionPillButtonStyle(prominent: false))
+                .help("Transcript")
 
                 Button {
                     onNewNote?()

@@ -12,6 +12,7 @@ struct ComposerView: View {
     let enhancer: NoteEnhancer
     var onGoToMenu: (() -> Void)?
     var onSubmitted: (() -> Void)?
+    var startRecordingOnAppear: Bool = false
 
     @State private var rawText: String = ""
     @State private var isSubmitting = false
@@ -19,6 +20,9 @@ struct ComposerView: View {
 
     @FocusState private var isEditorFocused: Bool
     private let minimumProcessingTime: Duration = .seconds(3)
+
+    @StateObject private var transcriber = SpeechTranscriber()
+    @State private var typedBeforeRecording: String = ""
 
     var body: some View {
         NotionPage(topBar: AnyView(topBar)) {
@@ -45,7 +49,12 @@ struct ComposerView: View {
             }
             .padding(.top, 8)
         }
-        .onAppear { isEditorFocused = true }
+        .onAppear {
+            isEditorFocused = true
+            if startRecordingOnAppear {
+                Task { await toggleRecording() }
+            }
+        }
         .alert("Submit failed", isPresented: Binding(
             get: { errorMessage != nil },
             set: { isPresented in
@@ -70,6 +79,21 @@ struct ComposerView: View {
             Spacer()
 
             Button {
+                Task { await toggleRecording() }
+            } label: {
+                Image(systemName: transcriber.isRecording ? "mic.fill" : "mic")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(transcriber.isRecording ? Color.white : Color.black.opacity(0.88))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 999, style: .continuous)
+                            .fill(transcriber.isRecording ? Color.red.opacity(0.9) : Color.black.opacity(0.06))
+                    )
+            }
+            .help(transcriber.isRecording ? "Stop transcription" : "Start transcription")
+
+            Button {
                 submit()
             } label: {
                 if isSubmitting {
@@ -88,6 +112,16 @@ struct ComposerView: View {
     }
 
     private var editor: some View {
+        Group {
+            if transcriber.isRecording {
+                transcriptDisplay
+            } else {
+                typingEditor
+            }
+        }
+    }
+
+    private var typingEditor: some View {
         ZStack(alignment: .topLeading) {
             TextEditor(text: $rawText)
                 .focused($isEditorFocused)
@@ -104,6 +138,71 @@ struct ComposerView: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 8)
             }
+        }
+    }
+
+    private var transcriptDisplay: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text("Transcribing…")
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                    .foregroundStyle(Color.black.opacity(0.8))
+                Spacer()
+                if let err = transcriber.lastError, !err.isEmpty {
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(Color.black.opacity(0.55))
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color.black.opacity(0.045), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            ScrollView {
+                Text(transcriber.transcript.isEmpty ? "Speak to start…" : transcriber.transcript)
+                    .font(.system(size: 16, weight: .regular, design: .default))
+                    .lineSpacing(4)
+                    .foregroundStyle(Color.black.opacity(transcriber.transcript.isEmpty ? 0.55 : 0.86))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding(.vertical, 6)
+            }
+            .frame(minHeight: 280)
+        }
+    }
+
+    private func toggleRecording() async {
+        if transcriber.isRecording {
+            transcriber.stop()
+            let t = transcriber.finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty {
+                if typedBeforeRecording.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    rawText = t
+                } else {
+                    rawText = typedBeforeRecording + "\n\n" + t
+                }
+            } else {
+                rawText = typedBeforeRecording
+            }
+            typedBeforeRecording = ""
+            isEditorFocused = true
+            return
+        }
+
+        // Start recording.
+        typedBeforeRecording = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        rawText = ""
+        isEditorFocused = false
+        transcriber.reset()
+        await transcriber.start()
+
+        if !transcriber.isRecording, let err = transcriber.lastError, !err.isEmpty {
+            errorMessage = err
+            rawText = typedBeforeRecording
+            typedBeforeRecording = ""
+            isEditorFocused = true
         }
     }
 

@@ -10,6 +10,12 @@ enum NotionStyle {
     static let canvas = Color(red: 0.969, green: 0.965, blue: 0.957) // ~ #F7F6F4
     static let page = Color.white
     static let line = Color.black.opacity(0.08)
+
+    static let fillSubtle = Color.black.opacity(0.035)
+    static let fillSubtleHover = Color.black.opacity(0.045)
+    static let fillChip = Color.black.opacity(0.055)
+
+    static let textPrimary = Color.black.opacity(0.86)
     static let textSecondary = Color.black.opacity(0.55)
 
     static let pageMaxWidth: CGFloat = 820
@@ -83,11 +89,11 @@ struct NotionPillButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(.subheadline, design: .rounded).weight(.semibold))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 999, style: .continuous)
-                    .fill(prominent ? Color.black.opacity(configuration.isPressed ? 0.9 : 0.85) : Color.black.opacity(configuration.isPressed ? 0.08 : 0.06))
+                    .fill(prominent ? Color.black.opacity(configuration.isPressed ? 0.9 : 0.85) : Color.black.opacity(configuration.isPressed ? 0.065 : 0.045))
             )
             .foregroundStyle(prominent ? Color.white : Color.black.opacity(0.88))
     }
@@ -98,7 +104,31 @@ struct NotionRowBackground: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(isHovered ? Color.black.opacity(0.045) : Color.clear)
+            .fill(isHovered ? NotionStyle.fillSubtleHover : Color.clear)
     }
 }
 
+struct NotionChip: View {
+    let text: String
+    var systemImage: String? = nil
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.black.opacity(0.5))
+            }
+            Text(text)
+        }
+        .font(.system(.caption, design: .rounded).weight(.semibold))
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(NotionStyle.fillChip, in: RoundedRectangle(cornerRadius: 999, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 999, style: .continuous)
+                .strokeBorder(NotionStyle.line, lineWidth: 1)
+        )
+        .foregroundStyle(Color.black.opacity(0.68))
+    }
+}

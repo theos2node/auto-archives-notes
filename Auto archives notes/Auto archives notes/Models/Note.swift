@@ -29,6 +29,16 @@ enum NotePriority: String, CaseIterable, Sendable {
     case p3
 }
 
+enum NoteArea: String, CaseIterable, Sendable {
+    case work
+    case personal
+    case health
+    case finance
+    case learning
+    case admin
+    case other
+}
+
 @Model
 final class Note {
     @Attribute(.unique) var id: UUID
@@ -50,8 +60,15 @@ final class Note {
     var kindRaw: String
     var statusRaw: String
     var priorityRaw: String
+    var areaRaw: String
     var project: String
     var peopleCSV: String
+
+    // Structured extraction.
+    var dueAt: Date?
+    var summary: String
+    var actionItemsText: String
+    var linksCSV: String
 
     init(
         id: UUID = UUID(),
@@ -67,8 +84,13 @@ final class Note {
         kind: NoteKind = .idea,
         status: NoteStatus = .inbox,
         priority: NotePriority = .p3,
+        area: NoteArea = .other,
         project: String = "",
-        people: [String] = []
+        people: [String] = [],
+        dueAt: Date? = nil,
+        summary: String = "",
+        actionItems: [String] = [],
+        links: [String] = []
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -83,8 +105,13 @@ final class Note {
         self.kindRaw = kind.rawValue
         self.statusRaw = status.rawValue
         self.priorityRaw = priority.rawValue
+        self.areaRaw = area.rawValue
         self.project = project
         self.peopleCSV = people.joined(separator: ",")
+        self.dueAt = dueAt
+        self.summary = summary
+        self.actionItemsText = actionItems.joined(separator: "\n")
+        self.linksCSV = links.joined(separator: ",")
     }
 
     var tags: [String] {
@@ -100,7 +127,12 @@ final class Note {
     }
 
     var displayTitle: String {
-        if isEnhancing { return "Enhancing…" }
+        if isEnhancing {
+            let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { return t }
+            let fallback = fallbackTitleFromText(rawText)
+            return fallback.isEmpty ? "Enhancing…" : fallback
+        }
         if enhancementError != nil { return displayTitleOr("Needs review") }
         return displayTitleOr("Untitled")
     }
@@ -110,8 +142,20 @@ final class Note {
         return t.isEmpty ? fallback : t
     }
 
+    private func fallbackTitleFromText(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "" }
+        let cleaned = trimmed.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        let words = cleaned.split(separator: " ")
+        let prefix = words.prefix(5)
+        return prefix.joined(separator: " ")
+    }
+
     var displayEmoji: String {
-        if isEnhancing { return "⏳" }
+        if isEnhancing {
+            let e = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
+            return e.isEmpty ? "⏳" : e
+        }
         if enhancementError != nil { return "⚠️" }
         let e = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
         return e.isEmpty ? "📝" : e
@@ -132,6 +176,11 @@ final class Note {
         set { priorityRaw = newValue.rawValue }
     }
 
+    var area: NoteArea {
+        get { NoteArea(rawValue: areaRaw) ?? .other }
+        set { areaRaw = newValue.rawValue }
+    }
+
     var people: [String] {
         get {
             peopleCSV
@@ -141,6 +190,36 @@ final class Note {
         }
         set {
             peopleCSV = newValue.joined(separator: ",")
+        }
+    }
+
+    var actionItems: [String] {
+        get {
+            actionItemsText
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+        set {
+            actionItemsText = newValue
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+        }
+    }
+
+    var links: [String] {
+        get {
+            linksCSV
+                .split(separator: ",")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+        set {
+            linksCSV = newValue
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: ",")
         }
     }
 }

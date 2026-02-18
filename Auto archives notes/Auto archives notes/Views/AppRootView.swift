@@ -6,13 +6,13 @@
 import SwiftUI
 
 enum AppScreen: Hashable {
-    case composer
+    case composer(transcript: Bool)
     case menu
     case detail(UUID)
 }
 
 struct AppRootView: View {
-    @State private var screen: AppScreen = .composer
+    @State private var screen: AppScreen = .composer(transcript: false)
 
     private let enhancer: NoteEnhancer = BestAvailableNoteEnhancer(
         fallback: LocalHeuristicEnhancer(effort: .max)
@@ -21,17 +21,19 @@ struct AppRootView: View {
     var body: some View {
         ZStack {
             switch screen {
-            case .composer:
+            case .composer(let transcript):
                 ComposerView(
                     enhancer: enhancer,
                     onGoToMenu: { screen = .menu },
-                    onSubmitted: { screen = .menu }
+                    onSubmitted: { screen = .menu },
+                    startRecordingOnAppear: transcript
                 )
                 .transition(.opacity)
 
             case .menu:
                 MainMenuView(
-                    onNewNote: { screen = .composer },
+                    onNewNote: { screen = .composer(transcript: false) },
+                    onTranscript: { screen = .composer(transcript: true) },
                     onOpenNote: { id in screen = .detail(id) }
                 )
                 .transition(.opacity)
@@ -40,7 +42,7 @@ struct AppRootView: View {
                 NoteDetailHostView(
                     noteID: id,
                     onGoToMenu: { screen = .menu },
-                    onNewNote: { screen = .composer }
+                    onNewNote: { screen = .composer(transcript: false) }
                 )
                 .transition(.opacity)
             }

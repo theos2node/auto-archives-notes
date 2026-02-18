@@ -12,6 +12,7 @@ struct ComposerView: View {
     let enhancer: NoteEnhancer
     var onGoToMenu: (() -> Void)?
     var onSubmitted: (() -> Void)?
+    var startRecordingOnAppear: Bool = false
 
     @State private var rawText: String = ""
     @State private var isSubmitting = false
@@ -19,6 +20,8 @@ struct ComposerView: View {
 
     @FocusState private var isEditorFocused: Bool
     private let minimumProcessingTime: Duration = .seconds(3)
+
+    @StateObject private var transcriber = SpeechTranscriber()
 
     var body: some View {
         NotionPage(topBar: AnyView(topBar)) {
@@ -45,7 +48,14 @@ struct ComposerView: View {
             }
             .padding(.top, 8)
         }
-        .onAppear { isEditorFocused = true }
+        .onAppear {
+            if startRecordingOnAppear {
+                Task { await toggleRecording() }
+            } else {
+                // Ensure focus lands inside the TextEditor after the view is on-screen.
+                Task { @MainActor in isEditorFocused = true }
+            }
+        }
         .alert("Submit failed", isPresented: Binding(
             get: { errorMessage != nil },
             set: { isPresented in
@@ -70,6 +80,22 @@ struct ComposerView: View {
             Spacer()
 
             Button {
+                Task { await toggleRecording() }
+            } label: {
+                Image(systemName: transcriber.isRecording ? "mic.fill" : "mic")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(transcriber.isRecording ? Color.white : Color.black.opacity(0.88))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 999, style: .continuous)
+                            .fill(transcriber.isRecording ? Color.red.opacity(0.9) : Color.black.opacity(0.06))
+                    )
+            }
+            .disabled(isSubmitting || transcriber.isTranscribing)
+            .help(transcriber.isRecording ? "Stop recording and transcribe" : "Start recording")
+
+            Button {
                 submit()
             } label: {
                 if isSubmitting {
@@ -82,29 +108,143 @@ struct ComposerView: View {
                 }
             }
             .buttonStyle(NotionPillButtonStyle(prominent: true))
-            .disabled(isSubmitting || rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(
+                isSubmitting
+                    || transcriber.isRecording
+                    || transcriber.isTranscribing
+                    || rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            )
             .keyboardShortcut(.return, modifiers: [.command])
         }
     }
 
     private var editor: some View {
+        Group {
+            if transcriber.isRecording {
+                recordingDisplay
+            } else if transcriber.isTranscribing {
+                transcribingDisplay
+            } else {
+                typingEditor
+            }
+        }
+    }
+
+    private var typingEditor: some View {
         ZStack(alignment: .topLeading) {
             TextEditor(text: $rawText)
                 .focused($isEditorFocused)
                 .font(.system(size: 16, weight: .regular, design: .default))
-                .lineSpacing(4)
                 .scrollContentBackground(.hidden)
                 .background(.clear)
                 .disabled(isSubmitting)
-
-            if rawText.isEmpty {
-                Text("Type anything…")
-                    .font(.system(size: 16, weight: .regular, design: .default))
-                    .foregroundStyle(NotionStyle.textSecondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 8)
-            }
         }
+    }
+
+    private var transcriptDisplay: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text("Transcribing…")
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                    .foregroundStyle(Color.black.opacity(0.8))
+                Spacer()
+                if let err = transcriber.lastError, !err.isEmpty {
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(Color.black.opacity(0.55))
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(NotionStyle.fillSubtleHover, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            ScrollView {
+                Text(transcriber.transcript.isEmpty ? "Processing recording…" : transcriber.transcript)
+                    .font(.system(size: 16, weight: .regular, design: .default))
+                    .lineSpacing(4)
+                    .foregroundStyle(transcriber.transcript.isEmpty ? NotionStyle.textSecondary : NotionStyle.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding(.vertical, 6)
+            }
+            .frame(minHeight: 280)
+        }
+    }
+
+    private var recordingDisplay: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(Color.red.opacity(0.9))
+                    .frame(width: 10, height: 10)
+                Text("Recording…")
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                    .foregroundStyle(Color.black.opacity(0.8))
+                Spacer()
+                Text(formatTime(transcriber.recordingSeconds))
+                    .font(.caption)
+                    .foregroundStyle(NotionStyle.textSecondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(NotionStyle.fillSubtleHover, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            Text("Tap the microphone again to stop and transcribe.")
+                .font(.system(size: 16, weight: .regular, design: .default))
+                .lineSpacing(4)
+                .foregroundStyle(NotionStyle.textPrimary)
+        }
+        .frame(minHeight: 280, alignment: .top)
+    }
+
+    private var transcribingDisplay: some View {
+        transcriptDisplay
+    }
+
+    private func toggleRecording() async {
+        if transcriber.isTranscribing { return }
+
+        if transcriber.isRecording {
+            isEditorFocused = false
+            let existing = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            do {
+                let t = try await transcriber.stopRecordingAndTranscribe()
+                let newText = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !newText.isEmpty {
+                    if existing.isEmpty {
+                        rawText = newText
+                    } else {
+                        rawText = existing + "\n\n" + newText
+                    }
+                }
+                isEditorFocused = true
+            } catch {
+                errorMessage = transcriber.lastError ?? (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+                isEditorFocused = true
+            }
+            return
+        }
+
+        // Start recording.
+        isEditorFocused = false
+        transcriber.reset()
+        await transcriber.startRecording()
+
+        if !transcriber.isRecording, let err = transcriber.lastError, !err.isEmpty {
+            errorMessage = err
+            isEditorFocused = true
+        }
+    }
+
+    private func formatTime(_ seconds: TimeInterval) -> String {
+        let s = max(0, Int(seconds.rounded()))
+        let h = s / 3600
+        let m = (s % 3600) / 60
+        let sec = s % 60
+        if h > 0 { return String(format: "%d:%02d:%02d", h, m, sec) }
+        return String(format: "%d:%02d", m, sec)
     }
 
     private func submit() {
@@ -131,8 +271,13 @@ struct ComposerView: View {
             kind: .idea,
             status: .inbox,
             priority: .p3,
+            area: .other,
             project: "",
-            people: []
+            people: [],
+            dueAt: nil,
+            summary: "",
+            actionItems: [],
+            links: []
         )
         modelContext.insert(note)
         do { try modelContext.save() } catch { /* non-fatal */ }
@@ -163,8 +308,13 @@ struct ComposerView: View {
                             note.kind = enhancement.kind
                             note.status = enhancement.status
                             note.priority = enhancement.priority
+                            note.area = enhancement.area
                             note.project = enhancement.project
                             note.people = enhancement.people
+                            note.dueAt = enhancement.dueAt
+                            note.summary = enhancement.summary
+                            note.actionItems = enhancement.actionItems
+                            note.links = enhancement.links
                             note.isEnhancing = false
                             note.enhancementError = nil
                             try? modelContext.save()

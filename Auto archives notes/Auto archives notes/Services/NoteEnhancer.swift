@@ -107,11 +107,17 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
 
         var candidate: String
         if trimmedLead.count >= 3 {
-            candidate = trimmedLead.prefix(9).joined(separator: " ")
+            // Hard requirement: <= 5 words.
+            candidate = trimmedLead.prefix(5).joined(separator: " ")
         } else {
             // Fallback: build a title from keywords.
             let keywords = topKeywords(in: s, limit: 4)
-            candidate = keywords.isEmpty ? "Quick Note" : keywords.joined(separator: " ").capitalized
+            if keywords.isEmpty {
+                candidate = "Quick Note"
+            } else {
+                // Also keep <= 5 words here.
+                candidate = keywords.prefix(5).joined(separator: " ").capitalized
+            }
         }
 
         candidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)

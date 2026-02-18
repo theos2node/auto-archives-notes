@@ -10,6 +10,7 @@ struct ComposerView: View {
     @Environment(\.modelContext) private var modelContext
 
     let enhancer: NoteEnhancer
+    var onGoToMenu: (() -> Void)?
     var onSubmitted: (() -> Void)?
 
     @State private var rawText: String = ""
@@ -17,20 +18,12 @@ struct ComposerView: View {
     @State private var errorMessage: String?
 
     @FocusState private var isEditorFocused: Bool
-    private let minimumProcessingTime: Duration = .seconds(1.5)
+    private let minimumProcessingTime: Duration = .seconds(3)
 
     var body: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                header
-                editor
-                footer
-            }
-
-            if isSubmitting {
-                processingOverlay
-                    .transition(.opacity)
-            }
+        VStack(spacing: 0) {
+            editor
+            bottomBar
         }
         .onAppear { isEditorFocused = true }
         .alert("Submit failed", isPresented: Binding(
@@ -43,35 +36,6 @@ struct ComposerView: View {
         }, message: {
             Text(errorMessage ?? "")
         })
-    }
-
-    private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text("Capture")
-                .font(.system(.title2, design: .rounded).weight(.semibold))
-
-            Text("Type anything. No title. No structure.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-
-            Spacer()
-
-            Button {
-                submit()
-            } label: {
-                if isSubmitting {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Text("Submit")
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(isSubmitting || rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .keyboardShortcut(.return, modifiers: [.command])
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 16)
-        .padding(.bottom, 10)
     }
 
     private var editor: some View {
@@ -91,53 +55,36 @@ struct ComposerView: View {
                     .padding(.vertical, 22)
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 12)
+        .padding(18)
     }
 
-    private var footer: some View {
+    private var bottomBar: some View {
         HStack(spacing: 10) {
-            if isSubmitting {
-                Text("Thinking harder (max effort)…")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Cmd+Enter to submit")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            Button {
+                onGoToMenu?()
+            } label: {
+                Text("Main menu")
             }
+            .buttonStyle(.bordered)
 
             Spacer()
 
-            if !rawText.isEmpty {
-                Button("Clear") { rawText = "" }
-                    .buttonStyle(.borderless)
+            Button {
+                submit()
+            } label: {
+                if isSubmitting {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("Submit")
+                }
             }
+            .buttonStyle(.borderedProminent)
+            .disabled(isSubmitting || rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .keyboardShortcut(.return, modifiers: [.command])
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 12)
+        .padding(.vertical, 14)
         .background(.thinMaterial)
-    }
-
-    private var processingOverlay: some View {
-        VStack(spacing: 10) {
-            ProgressView()
-                .controlSize(.regular)
-
-            Text("Enhancing your note…")
-                .font(.system(.headline, design: .rounded))
-
-            Text("Give it a minute. I’d rather be good than fast.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
-        .padding(18)
-        .frame(maxWidth: 420)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(.quaternary, lineWidth: 1)
-        )
     }
 
     private func submit() {
@@ -163,6 +110,9 @@ struct ComposerView: View {
         modelContext.insert(note)
         do { try modelContext.save() } catch { /* non-fatal */ }
 
+        // Immediately return the user to the main menu, while enhancement continues in the background.
+        onSubmitted?()
+
         Task { @MainActor in
             let clock = ContinuousClock()
             let startedAt = clock.now
@@ -183,7 +133,6 @@ struct ComposerView: View {
 
                 isSubmitting = false
                 isEditorFocused = true
-                onSubmitted?()
             } catch {
                 // Keep the raw note, but mark it failed and show original.
                 note.isEnhancing = false

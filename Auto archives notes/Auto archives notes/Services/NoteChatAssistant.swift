@@ -182,7 +182,9 @@ fileprivate final class AppleNotesChat: @unchecked Sendable {
         \(question)
         """
 
-        let intent = try await s.respond(to: prompt, generating: NoteQueryIntent.self, options: opts).content
+        let intent = try await AppleModelCallQueue.shared.withLock {
+            try await s.respond(to: prompt, generating: NoteQueryIntent.self, options: opts).content
+        }
         return intent.normalized()
     }
 
@@ -296,7 +298,9 @@ fileprivate final class AppleNotesChat: @unchecked Sendable {
         - indices: 0-6 integers referencing the notes you used (by index)
         """
 
-        let content = try await session.respond(to: prompt, generating: ChatAnswer.self, options: opts).content
+        let content = try await AppleModelCallQueue.shared.withLock {
+            try await session.respond(to: prompt, generating: ChatAnswer.self, options: opts).content
+        }
         let answerText = content.answer.trimmingCharacters(in: .whitespacesAndNewlines)
         let used = content.indices
             .map { max(0, min($0, candidates.count - 1)) }

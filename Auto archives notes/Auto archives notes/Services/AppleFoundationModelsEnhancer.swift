@@ -14,8 +14,6 @@ import FoundationModels
 @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
 final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
     actor Runner {
-        private var generalSession: LanguageModelSession?
-        private var taggingSession: LanguageModelSession?
         private let iso8601 = ISO8601DateFormatter()
 
         private let stopwords: Set<String> = [
@@ -25,14 +23,9 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
             "their", "then", "there", "this", "to", "up", "was", "we", "with", "you", "your"
         ]
 
-        private func getOrCreateGeneralSession() -> LanguageModelSession {
-            if let generalSession { return generalSession }
-
-            let model = SystemLanguageModel(
-                useCase: .general,
-                guardrails: .permissiveContentTransformations
-            )
-
+        private func makeGeneralSession() -> LanguageModelSession {
+            // Fresh session per enhancement run to avoid cross-note context bleed.
+            let model = SystemLanguageModel(useCase: .general, guardrails: .permissiveContentTransformations)
             let s = LanguageModelSession(model: model, tools: []) {
                 """
                 You are an expert writing and information organizer.
@@ -40,35 +33,18 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
                 Be precise, keep formatting and line breaks when they carry meaning.
                 """
             }
-
-            #if compiler(>=5.3) && $NonescapableTypes
-            s.prewarm()
-            #endif
-
-            generalSession = s
             return s
         }
 
-        private func getOrCreateTaggingSession() -> LanguageModelSession {
-            if let taggingSession { return taggingSession }
-
-            let model = SystemLanguageModel(
-                useCase: .contentTagging,
-                guardrails: .permissiveContentTransformations
-            )
-
+        private func makeTaggingSession() -> LanguageModelSession {
+            // Fresh session per enhancement run to avoid cross-note context bleed.
+            let model = SystemLanguageModel(useCase: .contentTagging, guardrails: .permissiveContentTransformations)
             let s = LanguageModelSession(model: model, tools: []) {
                 """
                 You are a careful classifier for a personal notes database.
                 Follow constraints exactly. Output only what is requested.
                 """
             }
-
-            #if compiler(>=5.3) && $NonescapableTypes
-            s.prewarm()
-            #endif
-
-            taggingSession = s
             return s
         }
 
@@ -81,8 +57,11 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
         }
 
         private func callString(_ s: LanguageModelSession, _ prompt: String, maxTokens: Int) async throws -> String {
-            try await s.respond(to: prompt, options: options(maxTokens: maxTokens)).content
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let opts = options(maxTokens: maxTokens)
+            let content = try await AppleModelCallQueue.shared.withLock {
+                try await s.respond(to: prompt, options: opts).content
+            }
+            return content.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         private func ensureAvailable(_ model: SystemLanguageModel) throws {
@@ -104,8 +83,8 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
             let tagModel = SystemLanguageModel(useCase: .contentTagging, guardrails: .permissiveContentTransformations)
             try ensureAvailable(tagModel)
 
-            let general = getOrCreateGeneralSession()
-            let tagging = getOrCreateTaggingSession()
+            let general = makeGeneralSession()
+            let tagging = makeTaggingSession()
 
             // Pass 1: rewrite/correct the note.
             let correctedPrompt = """

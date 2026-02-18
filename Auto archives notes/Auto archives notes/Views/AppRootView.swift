@@ -8,6 +8,7 @@ import SwiftUI
 enum AppScreen: Hashable {
     case composer(transcript: Bool)
     case menu
+    case chat
     case detail(UUID)
 }
 
@@ -34,7 +35,16 @@ struct AppRootView: View {
                 MainMenuView(
                     onNewNote: { screen = .composer(transcript: false) },
                     onTranscript: { screen = .composer(transcript: true) },
+                    onChat: { screen = .chat },
                     onOpenNote: { id in screen = .detail(id) }
+                )
+                .transition(.opacity)
+
+            case .chat:
+                ChatView(
+                    onGoToMenu: { screen = .menu },
+                    onOpenNote: { id in screen = .detail(id) },
+                    onNewNote: { screen = .composer(transcript: false) }
                 )
                 .transition(.opacity)
 

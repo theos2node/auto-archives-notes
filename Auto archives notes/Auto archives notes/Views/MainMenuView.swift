@@ -11,6 +11,7 @@ struct MainMenuView: View {
 
     var onNewNote: (() -> Void)?
     var onTranscript: (() -> Void)?
+    var onChat: (() -> Void)?
     var onOpenNote: ((UUID) -> Void)?
 
     @State private var view: MenuView = .inbox
@@ -62,6 +63,14 @@ struct MainMenuView: View {
                 }
                 .buttonStyle(NotionPillButtonStyle(prominent: false))
                 .help("Transcript")
+
+                Button {
+                    onChat?()
+                } label: {
+                    Image(systemName: "bubble.left.and.bubble.right")
+                }
+                .buttonStyle(NotionPillButtonStyle(prominent: false))
+                .help("Chat")
 
                 Button {
                     onNewNote?()

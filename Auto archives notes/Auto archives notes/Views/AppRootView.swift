@@ -14,7 +14,9 @@ enum AppScreen: Hashable {
 struct AppRootView: View {
     @State private var screen: AppScreen = .composer
 
-    private let enhancer: NoteEnhancer = LocalHeuristicEnhancer(effort: .max)
+    private let enhancer: NoteEnhancer = BestAvailableNoteEnhancer(
+        fallback: LocalHeuristicEnhancer(effort: .max)
+    )
 
     var body: some View {
         switch screen {
@@ -42,4 +44,3 @@ struct AppRootView: View {
         }
     }
 }
-

@@ -14,14 +14,14 @@ import AppKit
 import UIKit
 #endif
 
-struct NoteEnhancement {
+struct NoteEnhancement: Sendable {
     var correctedText: String
     var title: String
     var emoji: String
     var tags: [String]
 }
 
-protocol NoteEnhancer {
+protocol NoteEnhancer: Sendable {
     func enhance(rawText: String) async throws -> NoteEnhancement
 }
 
@@ -34,21 +34,21 @@ enum EnhancementEffort: Sendable {
     case max
 }
 
-final class LocalHeuristicEnhancer: NoteEnhancer {
-    private let effort: EnhancementEffort
+final class LocalHeuristicEnhancer: NoteEnhancer, @unchecked Sendable {
+    nonisolated let effort: EnhancementEffort
 
-    private let stopwords: Set<String> = [
+    nonisolated let stopwords: Set<String> = [
         "a", "an", "and", "are", "as", "at", "be", "but", "by",
         "for", "from", "has", "have", "i", "if", "in", "into", "is", "it",
         "me", "my", "not", "of", "on", "or", "our", "so", "that", "the",
         "their", "then", "there", "this", "to", "up", "was", "we", "with", "you", "your"
     ]
 
-    init(effort: EnhancementEffort = .max) {
+    nonisolated init(effort: EnhancementEffort = .max) {
         self.effort = effort
     }
 
-    func enhance(rawText: String) async throws -> NoteEnhancement {
+    nonisolated func enhance(rawText: String) async throws -> NoteEnhancement {
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw NoteEnhancerError.emptyInput }
 
@@ -74,7 +74,7 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
         )
     }
 
-    private func normalizeWhitespace(in s: String) -> String {
+    nonisolated private func normalizeWhitespace(in s: String) -> String {
         // Collapse 3+ blank lines into 2; trim trailing spaces per-line.
         let lines = s
             .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
@@ -94,7 +94,7 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
         return out.joined(separator: "\n")
     }
 
-    private func makeTitle(from s: String, fallbackRaw: String) -> String {
+    nonisolated private func makeTitle(from s: String, fallbackRaw: String) -> String {
         // Prefer the first meaningful sentence/line, but avoid titles that are just stopwords ("The").
         let base = firstMeaningfulChunk(in: s) ?? firstMeaningfulChunk(in: fallbackRaw) ?? s
 
@@ -126,7 +126,7 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
         return candidate
     }
 
-    private func firstMeaningfulChunk(in s: String) -> String? {
+    nonisolated private func firstMeaningfulChunk(in s: String) -> String? {
         // First non-empty line; if it's too short, fall back to first sentence-ish chunk.
         let lines = s
             .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
@@ -145,7 +145,7 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
         return sentence ?? lines.first
     }
 
-    private func tokenizeWords(_ s: String) -> [String] {
+    nonisolated private func tokenizeWords(_ s: String) -> [String] {
         let tokenizer = NLTokenizer(unit: .word)
         tokenizer.string = s
         var out: [String] = []
@@ -157,7 +157,7 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
         return out
     }
 
-    private func dropLeadingStopwords(_ words: [String]) -> [String] {
+    nonisolated private func dropLeadingStopwords(_ words: [String]) -> [String] {
         var i = 0
         while i < words.count {
             let w = words[i].lowercased()
@@ -170,7 +170,7 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
         return Array(words.dropFirst(i))
     }
 
-    private func topKeywords(in s: String, limit: Int) -> [String] {
+    nonisolated private func topKeywords(in s: String, limit: Int) -> [String] {
         // Prefer nouns and named entities; fall back to frequent non-stopwords.
         let tagger = NLTagger(tagSchemes: [.lexicalClass, .nameType])
         tagger.string = s
@@ -212,7 +212,7 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
         return Array(sorted.prefix(limit).map(\.key))
     }
 
-    private func makeTags(from s: String) -> [String] {
+    nonisolated private func makeTags(from s: String) -> [String] {
         var out: [String] = []
 
         // Prefer semantic keywords first.
@@ -257,7 +257,7 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
         return out.prefix(12).map { $0 }
     }
 
-    private func pickEmoji(title: String, tags: [String]) -> String {
+    nonisolated private func pickEmoji(title: String, tags: [String]) -> String {
         let hay = ([title] + tags).joined(separator: " ").lowercased()
 
         // Extremely simple mapping for now.
@@ -270,7 +270,7 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
         return "📝"
     }
 
-    private func spellCorrect(_ s: String) -> String {
+    nonisolated private func spellCorrect(_ s: String) -> String {
         #if os(macOS)
         return spellCorrectWithNSSpellChecker(s)
         #elseif os(iOS) || os(visionOS)
@@ -281,7 +281,7 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
     }
 
     #if os(macOS)
-    private func spellCorrectWithNSSpellChecker(_ s: String) -> String {
+    nonisolated private func spellCorrectWithNSSpellChecker(_ s: String) -> String {
         // Conservative spelling correction: only replace when the first guess differs.
         let ns = s as NSString
         let checker = NSSpellChecker.shared
@@ -311,7 +311,7 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
     #endif
 
     #if os(iOS) || os(visionOS)
-    private func spellCorrectWithUITextChecker(_ s: String) -> String {
+    nonisolated private func spellCorrectWithUITextChecker(_ s: String) -> String {
         let ns = s as NSString
         let checker = UITextChecker()
         var replacements: [(NSRange, String)] = []
@@ -339,7 +339,7 @@ final class LocalHeuristicEnhancer: NoteEnhancer {
     }
     #endif
 
-    private func improveCasingAndPunctuation(in s: String) -> String {
+    nonisolated private func improveCasingAndPunctuation(in s: String) -> String {
         var out = s
 
         // Fix common spacing before punctuation.

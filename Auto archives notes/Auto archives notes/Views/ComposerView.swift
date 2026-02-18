@@ -50,9 +50,11 @@ struct ComposerView: View {
             .padding(.top, 8)
         }
         .onAppear {
-            isEditorFocused = true
             if startRecordingOnAppear {
                 Task { await toggleRecording() }
+            } else {
+                // Ensure focus lands inside the TextEditor after the view is on-screen.
+                Task { @MainActor in isEditorFocused = true }
             }
         }
         .alert("Submit failed", isPresented: Binding(
@@ -126,7 +128,6 @@ struct ComposerView: View {
             TextEditor(text: $rawText)
                 .focused($isEditorFocused)
                 .font(.system(size: 16, weight: .regular, design: .default))
-                .lineSpacing(4)
                 .scrollContentBackground(.hidden)
                 .background(.clear)
                 .disabled(isSubmitting)

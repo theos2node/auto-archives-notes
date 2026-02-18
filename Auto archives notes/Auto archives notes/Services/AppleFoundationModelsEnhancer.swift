@@ -14,7 +14,8 @@ import FoundationModels
 @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
 final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
     actor Runner {
-        private var session: LanguageModelSession?
+        private var generalSession: LanguageModelSession?
+        private var taggingSession: LanguageModelSession?
         private let iso8601 = ISO8601DateFormatter()
 
         private let stopwords: Set<String> = [
@@ -24,8 +25,8 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
             "their", "then", "there", "this", "to", "up", "was", "we", "with", "you", "your"
         ]
 
-        private func getOrCreateSession() -> LanguageModelSession {
-            if let session { return session }
+        private func getOrCreateGeneralSession() -> LanguageModelSession {
+            if let generalSession { return generalSession }
 
             let model = SystemLanguageModel(
                 useCase: .general,
@@ -44,8 +45,44 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
             s.prewarm()
             #endif
 
-            session = s
+            generalSession = s
             return s
+        }
+
+        private func getOrCreateTaggingSession() -> LanguageModelSession {
+            if let taggingSession { return taggingSession }
+
+            let model = SystemLanguageModel(
+                useCase: .contentTagging,
+                guardrails: .permissiveContentTransformations
+            )
+
+            let s = LanguageModelSession(model: model, tools: []) {
+                """
+                You are a careful classifier for a personal notes database.
+                Follow constraints exactly. Output only what is requested.
+                """
+            }
+
+            #if compiler(>=5.3) && $NonescapableTypes
+            s.prewarm()
+            #endif
+
+            taggingSession = s
+            return s
+        }
+
+        private func options(maxTokens: Int) -> GenerationOptions {
+            var opts = GenerationOptions()
+            opts.sampling = .greedy
+            opts.temperature = nil
+            opts.maximumResponseTokens = maxTokens
+            return opts
+        }
+
+        private func callString(_ s: LanguageModelSession, _ prompt: String, maxTokens: Int) async throws -> String {
+            try await s.respond(to: prompt, options: options(maxTokens: maxTokens)).content
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         private func ensureAvailable(_ model: SystemLanguageModel) throws {
@@ -64,13 +101,11 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
             // Check system availability before we start any work.
             let model = SystemLanguageModel(useCase: .general, guardrails: .permissiveContentTransformations)
             try ensureAvailable(model)
+            let tagModel = SystemLanguageModel(useCase: .contentTagging, guardrails: .permissiveContentTransformations)
+            try ensureAvailable(tagModel)
 
-            let s = getOrCreateSession()
-
-            var opts = GenerationOptions()
-            opts.sampling = .greedy
-            opts.temperature = nil
-            opts.maximumResponseTokens = 900
+            let general = getOrCreateGeneralSession()
+            let tagging = getOrCreateTaggingSession()
 
             // Pass 1: rewrite/correct the note.
             let correctedPrompt = """
@@ -86,42 +121,55 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
             \(trimmed)
             """
 
-            let corrected = try await s.respond(to: correctedPrompt, options: opts).content
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let corrected = try await callString(general, correctedPrompt, maxTokens: 900)
+            let correctedOrTrimmed = corrected.isEmpty ? trimmed : corrected
 
-            // Pass 2: generate compact metadata (title, emoji, tags).
-            let taggingModel = SystemLanguageModel(useCase: .contentTagging, guardrails: .permissiveContentTransformations)
-            try ensureAvailable(taggingModel)
-            let taggingSession = LanguageModelSession(model: taggingModel, tools: []) {
-                """
-                You generate accurate, structured classifications and metadata for notes.
-                Be concrete. Prefer specific tags over generic ones.
-                """
-            }
+            // Each attribute gets its own model call (more robust, higher quality).
+            let titleRaw = (try? await callString(tagging, titlePrompt(noteText: correctedOrTrimmed), maxTokens: 60)) ?? ""
+            let title = normalizeTitle(titleRaw, correctedText: correctedOrTrimmed)
 
-            opts.maximumResponseTokens = 500
-            let meta = try await taggingSession.respond(
-                to: metadataPrompt(correctedText: corrected),
-                generating: NoteMetadata.self,
-                options: opts
-            ).content
+            let emojiRaw = (try? await callString(tagging, emojiPrompt(noteText: correctedOrTrimmed), maxTokens: 20)) ?? ""
+            let emoji = normalizeEmoji(emojiRaw)
 
-            let title = normalizeTitle(meta.title, correctedText: corrected)
-            let emoji = normalizeEmoji(meta.emoji)
-            let tags = await normalizeTags(meta.tags, correctedText: corrected)
-            let kind = normalizeKind(meta.kind)
-            let status = normalizeStatus(meta.status, kind: kind)
-            let priority = normalizePriority(meta.priority, kind: kind)
-            let area = normalizeArea(meta.area)
-            let project = meta.project.trimmingCharacters(in: .whitespacesAndNewlines)
-            let people = normalizePeople(meta.people)
-            let dueAt = parseDueAt(meta.dueAtISO, kind: kind)
-            let summary = normalizeSummary(meta.summary, correctedText: corrected, title: title)
-            let actionItems = normalizeActionItems(meta.actionItems, kind: kind, title: title)
-            let links = normalizeLinks(meta.links, correctedText: corrected)
+            let tagsRaw = (try? await callString(tagging, tagsPrompt(noteText: correctedOrTrimmed), maxTokens: 120)) ?? ""
+            let tags = await normalizeTags(parseTags(from: tagsRaw), correctedText: correctedOrTrimmed)
+
+            let kindRaw = (try? await callString(tagging, kindPrompt(noteText: correctedOrTrimmed), maxTokens: 30)) ?? ""
+            let kind = normalizeKind(kindRaw)
+
+            let statusRaw = (try? await callString(tagging, statusPrompt(noteText: correctedOrTrimmed, kind: kind), maxTokens: 40)) ?? ""
+            let status = normalizeStatus(statusRaw, kind: kind)
+
+            let priorityRaw = (kind == .task)
+                ? ((try? await callString(tagging, priorityPrompt(noteText: correctedOrTrimmed), maxTokens: 30)) ?? "")
+                : ""
+            let priority = normalizePriority(priorityRaw, kind: kind)
+
+            let areaRaw = (try? await callString(tagging, areaPrompt(noteText: correctedOrTrimmed), maxTokens: 30)) ?? ""
+            let area = normalizeArea(areaRaw)
+
+            let projectRaw = (try? await callString(tagging, projectPrompt(noteText: correctedOrTrimmed), maxTokens: 70)) ?? ""
+            let project = projectRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let peopleRaw = (try? await callString(tagging, peoplePrompt(noteText: correctedOrTrimmed), maxTokens: 120)) ?? ""
+            let people = normalizePeople(parseList(from: peopleRaw))
+
+            let summaryRaw = (try? await callString(general, summaryPrompt(noteText: correctedOrTrimmed), maxTokens: 120)) ?? ""
+            let summary = normalizeSummary(summaryRaw, correctedText: correctedOrTrimmed, title: title)
+
+            let actionRaw = (try? await callString(general, actionItemsPrompt(noteText: correctedOrTrimmed, kind: kind), maxTokens: 240)) ?? ""
+            let actionItems = normalizeActionItems(parseList(from: actionRaw), kind: kind, title: title)
+
+            let dueRaw = (kind == .task)
+                ? ((try? await callString(tagging, dueAtPrompt(noteText: correctedOrTrimmed), maxTokens: 120)) ?? "")
+                : ""
+            let dueAt = parseDueAt(dueRaw, kind: kind)
+
+            // Prefer deterministic link extraction to avoid hallucinations.
+            let links = normalizeLinks([], correctedText: correctedOrTrimmed)
 
             return NoteEnhancement(
-                correctedText: corrected.isEmpty ? trimmed : corrected,
+                correctedText: correctedOrTrimmed,
                 title: title,
                 emoji: emoji,
                 tags: tags,
@@ -138,38 +186,219 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
             )
         }
 
-        private func metadataPrompt(correctedText: String) -> String {
+        private func titlePrompt(noteText: String) -> String {
+            """
+            Generate a short, specific title for this note.
+            Requirements:
+            - <= 5 words
+            - No leading articles ("the", "a", "an")
+            - Not generic
+            Output ONLY the title text.
+
+            NOTE:
+            \(noteText)
+            """
+        }
+
+        private func emojiPrompt(noteText: String) -> String {
+            """
+            Pick exactly 1 emoji that best represents this note.
+            Output ONLY the emoji.
+
+            NOTE:
+            \(noteText)
+            """
+        }
+
+        private func tagsPrompt(noteText: String) -> String {
+            """
+            Generate exactly 3 short, specific tags for this note.
+            Requirements:
+            - Each tag must start with '#'
+            - Avoid generic tags like #note #misc #thought
+            Output ONLY the 3 tags separated by spaces.
+
+            NOTE:
+            \(noteText)
+            """
+        }
+
+        private func kindPrompt(noteText: String) -> String {
+            """
+            Classify this note as exactly one kind: idea, task, meeting, journal, reference.
+            Definitions:
+            - idea: concepts, strategies, possibilities
+            - task: an action to do
+            - meeting: agenda, notes, follow-ups
+            - journal: personal reflection, feelings
+            - reference: factual info, how-to, links
+            Output ONLY one word.
+
+            NOTE:
+            \(noteText)
+            """
+        }
+
+        private func statusPrompt(noteText: String, kind: NoteKind) -> String {
+            """
+            Choose a status for this note: inbox, next, later, done.
+            Rules:
+            - If kind is task: choose next/later/done (default to next).
+            - Otherwise: choose inbox unless clearly done/archived.
+            Output ONLY one word.
+
+            Kind: \(kind.rawValue)
+            NOTE:
+            \(noteText)
+            """
+        }
+
+        private func priorityPrompt(noteText: String) -> String {
+            """
+            For a task note, choose priority: p1, p2, or p3.
+            p1 = urgent/important, p2 = important, p3 = minor.
+            Output ONLY one of: p1, p2, p3.
+
+            NOTE:
+            \(noteText)
+            """
+        }
+
+        private func areaPrompt(noteText: String) -> String {
+            """
+            Classify the life area for this note: work, personal, health, finance, learning, admin, other.
+            Output ONLY one word.
+
+            NOTE:
+            \(noteText)
+            """
+        }
+
+        private func projectPrompt(noteText: String) -> String {
+            """
+            If this note clearly belongs to a specific project (a concrete outcome with a name),
+            output that project name in 1-4 words.
+            If not, output an empty string.
+            Output ONLY the project name or empty string.
+
+            NOTE:
+            \(noteText)
+            """
+        }
+
+        private func peoplePrompt(noteText: String) -> String {
+            """
+            Extract up to 3 people names explicitly mentioned in the note.
+            If none, output an empty string.
+            Output ONLY the names, one per line (no bullets, no numbering).
+
+            NOTE:
+            \(noteText)
+            """
+        }
+
+        private func summaryPrompt(noteText: String) -> String {
+            """
+            Write a 1-sentence summary of the note.
+            Requirements:
+            - <= 20 words
+            - Concrete and specific
+            Output ONLY the sentence.
+
+            NOTE:
+            \(noteText)
+            """
+        }
+
+        private func actionItemsPrompt(noteText: String, kind: NoteKind) -> String {
+            """
+            Extract action items from the note.
+            Requirements:
+            - Output 0-7 items, each on its own line
+            - Imperative verb form
+            - No bullets, no numbering
+            - If kind is task, output at least 1 item
+            Output ONLY the lines.
+
+            Kind: \(kind.rawValue)
+            NOTE:
+            \(noteText)
+            """
+        }
+
+        private func dueAtPrompt(noteText: String) -> String {
             iso8601.formatOptions = [.withInternetDateTime]
             let now = iso8601.string(from: Date())
             let tz = TimeZone.current.identifier
 
             return """
-            You are organizing notes into a second-brain system. Do careful internal reasoning.
-            Output only the requested fields.
-
-            Context:
-            - Current date/time: \(now)
-            - Current timezone: \(tz)
-            - If the note contains relative dates (today/tomorrow/next week), resolve them to an absolute ISO-8601 date/time using the context above.
-
-            Based on the note text below, generate:
-            - title: no more than 5 words (avoid leading articles like "the", "a", "an")
-            - emoji: exactly 1 emoji that matches the note
-            - tags: exactly 3 short tags, each starting with '#', based on the content (not generic)
-            - kind: one of [idea, task, meeting, journal, reference]
-            - status: one of [inbox, next, later, done]
-            - priority: one of [p1, p2, p3] (if kind is task; otherwise use p3)
-            - area: one of [work, personal, health, finance, learning, admin, other]
-            - project: a short project name if clearly applicable, otherwise empty string (a project is a concrete outcome; area is ongoing)
-            - people: 0-3 names if explicitly mentioned, otherwise []
-            - summary: 1 sentence, <= 20 words, concrete and specific
-            - actionItems: 0-7 short action items (imperative). If kind is task, ensure at least 1.
-            - dueAtISO: deadline datetime in ISO-8601 if a deadline is explicitly present or strongly implied; otherwise empty string
-            - links: 0-3 URLs found in the note, otherwise []
+            Extract a due date/time for this task if a deadline is explicitly present or strongly implied.
+            Requirements:
+            - If there is a deadline, output it as ISO-8601 (date or datetime).
+            - Resolve relative dates (today/tomorrow/next week) using:
+              - Current date/time: \(now)
+              - Timezone: \(tz)
+            - If no deadline, output an empty string.
+            Output ONLY the ISO-8601 string or empty string.
 
             NOTE:
-            \(correctedText)
+            \(noteText)
             """
+        }
+
+        private func parseTags(from raw: String) -> [String] {
+            let cleaned = raw
+                .replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: ",", with: " ")
+                .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            return cleaned
+                .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+                .map(String.init)
+                .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:")) }
+                .filter { $0.hasPrefix("#") }
+        }
+
+        private func parseList(from raw: String) -> [String] {
+            let cleaned = raw
+                .replacingOccurrences(of: "\r", with: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if cleaned.isEmpty { return [] }
+
+            var out: [String] = []
+
+            let lines = cleaned
+                .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+                .map { String($0) }
+
+            for line0 in lines {
+                var line = line0.trimmingCharacters(in: .whitespacesAndNewlines)
+                if line.isEmpty { continue }
+
+                // Strip common list markers.
+                line = line.replacingOccurrences(
+                    of: #"^\s*([-*•]\s+|\d+[\.\)]\s+)"#,
+                    with: "",
+                    options: .regularExpression
+                )
+                line = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if line.isEmpty { continue }
+
+                // If a single line contains a few comma-separated values, split them.
+                if lines.count == 1, line.contains(",") {
+                    for part in line.split(separator: ",") {
+                        let t = part.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if t.isEmpty { continue }
+                        out.append(t)
+                    }
+                } else {
+                    out.append(line)
+                }
+            }
+
+            return out
         }
 
         private func normalizeTitle(_ s: String, correctedText: String) -> String {
@@ -386,24 +615,6 @@ final class AppleFoundationModelsEnhancer: NoteEnhancer, @unchecked Sendable {
     func enhance(rawText: String) async throws -> NoteEnhancement {
         try await runner.enhance(rawText: rawText)
     }
-}
-
-@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
-@Generable
-struct NoteMetadata {
-    var title: String
-    var emoji: String
-    var tags: [String]
-    var kind: String
-    var status: String
-    var priority: String
-    var area: String
-    var project: String
-    var people: [String]
-    var summary: String
-    var actionItems: [String]
-    var dueAtISO: String
-    var links: [String]
 }
 
 @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)

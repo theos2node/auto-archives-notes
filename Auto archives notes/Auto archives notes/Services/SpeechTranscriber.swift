@@ -45,6 +45,7 @@ final class SpeechTranscriber: ObservableObject {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private let recognizer = SFSpeechRecognizer()
+    private var segmentIndex: Int = 0
 
     // Roll the request periodically to avoid very long single-request sessions.
     private var rollingTask: Task<Void, Never>?
@@ -54,6 +55,7 @@ final class SpeechTranscriber: ObservableObject {
         liveText = ""
         finalText = ""
         lastError = nil
+        segmentIndex = 0
     }
 
     func start() async {
@@ -78,15 +80,7 @@ final class SpeechTranscriber: ObservableObject {
         rollingTask = nil
 
         // Flush live into final.
-        let live = liveText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !live.isEmpty {
-            if finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                finalText = live
-            } else {
-                finalText += " " + live
-            }
-        }
-        liveText = ""
+        commitSegment()
 
         isRecording = false
         stopEngine()
@@ -121,6 +115,7 @@ final class SpeechTranscriber: ObservableObject {
     private func startEngine() throws {
         // Clean up any previous run.
         stopEngine()
+        segmentIndex = 0
 
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
@@ -150,7 +145,7 @@ final class SpeechTranscriber: ObservableObject {
         task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
             guard let self else { return }
             if let result {
-                self.liveText = result.bestTranscription.formattedString
+                self.appendNewSegments(from: result.bestTranscription)
                 if result.isFinal {
                     self.commitSegment()
                 }
@@ -170,6 +165,7 @@ final class SpeechTranscriber: ObservableObject {
 
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
+        segmentIndex = 0
     }
 
     private func commitSegment() {
@@ -181,6 +177,36 @@ final class SpeechTranscriber: ObservableObject {
             finalText += " " + seg
         }
         liveText = ""
+        segmentIndex = 0
+    }
+
+    private func appendNewSegments(from transcription: SFTranscription) {
+        let segments = transcription.segments
+        if segments.isEmpty { return }
+
+        // Some recognizers reset the segment list mid-session. If that happens, finalize the current liveText.
+        if segments.count < segmentIndex {
+            commitSegment()
+            segmentIndex = 0
+        }
+
+        guard segments.count > segmentIndex else { return }
+
+        let newParts = segments[segmentIndex..<segments.count]
+            .map(\.substring)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        segmentIndex = segments.count
+
+        let delta = newParts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        if delta.isEmpty { return }
+
+        if liveText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            liveText = delta
+        } else {
+            liveText += " " + delta
+        }
     }
 
     private func startRolling() {
@@ -208,6 +234,7 @@ final class SpeechTranscriber: ObservableObject {
         task?.cancel()
         task = nil
         request?.endAudio()
+        segmentIndex = 0
 
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
@@ -220,7 +247,7 @@ final class SpeechTranscriber: ObservableObject {
         task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
             guard let self else { return }
             if let result {
-                self.liveText = result.bestTranscription.formattedString
+                self.appendNewSegments(from: result.bestTranscription)
                 if result.isFinal {
                     self.commitSegment()
                 }

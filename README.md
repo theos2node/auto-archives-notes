@@ -60,6 +60,19 @@ This repo is a working prototype. Areas that are intentionally still in-progress
 - Open `Auto archives notes.xcodeproj` in Xcode
 - Build and run the `Auto archives notes` scheme
 
+## Shortcut Metadata Workflow (iPad)
+
+The current title-generation flow is shortcut-driven and designed for iPad use:
+- A sparkles button next to `+` triggers metadata generation for untitled notes with body text.
+- The app launches a named Apple Shortcut via URL callback (`shortcuts://x-callback-url/run-shortcut`).
+- The shortcut is expected to return strict JSON:
+  - `{"title":"3-5 word title","summary":"one sentence summary"}`
+- If callback data is missing, the app falls back to clipboard on return to foreground.
+- If the shortcut is missing, the app prompts installation using an iCloud shortcut link.
+
+Full setup, required shortcut actions, JSON contract, and troubleshooting:
+- [`docs/shortcut-metadata-workflow.md`](docs/shortcut-metadata-workflow.md)
+
 ## Website
 
 This repo includes a GitHub Pages site in `docs/`.
